@@ -52,25 +52,27 @@ export function install(config, { addFetchHandler, preserveResponseUrl }) {
     return target.toString();
   }
 
-  return addFetchHandler(function (input, init, originalFetch) {
+  // Resolve the address family here, then hand the request on so the later
+  // features still see it. Returning a response from this handler would stop the
+  // chain and silently disable the Antigravity repairs.
+  return addFetchHandler(function (input, init, next) {
     const url = urlOf(input);
-    if (!url.startsWith("http://") && !url.startsWith("https://")) return undefined;
+    if (!url.startsWith("http://") && !url.startsWith("https://")) return next(input, init);
 
     let hostname;
     try {
       hostname = new URL(url).hostname;
     } catch {
-      return undefined;
+      return next(input, init);
     }
-    if (IP_OR_LOCAL.test(hostname) || IP_LITERAL.test(hostname)) return undefined;
-
-    const asRequestObject = !(typeof input === "string" || input instanceof URL);
-    const upstream = this;
+    if (IP_OR_LOCAL.test(hostname) || IP_LITERAL.test(hostname)) return next(input, init);
 
     return (async () => {
       const addresses = await resolve(hostname);
-      if (!addresses || addresses.v6.length === 0) return originalFetch.call(upstream, input, init);
+      // No IPv6, or nothing to choose from: pass straight through.
+      if (!addresses || addresses.v6.length === 0) return next(input, init);
 
+      const asRequestObject = !(typeof input === "string" || input instanceof URL);
       const candidates = [...addresses.v6, ...addresses.v4];
       let lastError = null;
 
@@ -78,21 +80,30 @@ export function install(config, { addFetchHandler, preserveResponseUrl }) {
         const target = withHostname(url, candidates[i]);
         const isLast = i === candidates.length - 1;
         try {
-          let response;
+          let outgoingInput = input;
+          let outgoingInit = init;
           if (asRequestObject && !init) {
             const request = new Request(target, input);
             request.headers.set("Host", hostname);
-            response = await originalFetch.call(upstream, request, { tls: { serverName: hostname } });
+            outgoingInput = request;
+            outgoingInit = { tls: { serverName: hostname } };
           } else {
+            // (url, init) form: the rewritten target must become the url, or the
+            // request silently keeps using the hostname and the original address
+            // family -- which is what made Antigravity reject the IPv4 path.
             const headers = init?.headers ? new Headers(init.headers) : new Headers();
             if (!headers.has("Host")) headers.set("Host", hostname);
-            response = await originalFetch.call(upstream, target, {
+            outgoingInput = target;
+            outgoingInit = {
               ...init,
               headers,
               tls: { ...(init?.tls ?? {}), serverName: hostname },
-            });
+            };
           }
-          // Bun drops `url` on responses we rebuild; keep the canonical hostname form.
+          // Continue from the rewritten target, so downstream features still
+          // inspect and repair the request.
+          const response = await next(outgoingInput, outgoingInit);
+          // Bun drops `url` on responses we rebuild; keep the canonical form.
           return preserveResponseUrl(response, url);
         } catch (error) {
           lastError = error;

@@ -43,11 +43,16 @@ const context = {
 
 /** Load order matters: body rewrites run before the stream-level features. */
 const LOAD_ORDER = [
-  "ipv6-first",
-  "antigravity-system-instruction",
-  "antigravity-routing",
-  "antigravity-continuation",
-  "antigravity-capture",
+  // Fetch layers, outermost first. The order IS the design: a layer's re-issued
+  // calls travel back down the stack, so anything a retry needs must sit below
+  // the layer that retries.
+  "antigravity-capture",            // watches the final stream
+  "antigravity-continuation",       // owns the response; retries re-enter below
+  "antigravity-system-instruction", // rewrite the outgoing envelope
+  "antigravity-routing",            // rewrite model + thinking level
+  "ipv6-first",                     // innermost: pin the egress address family
+
+  // Process-level features, outside the fetch stack.
   "vendor-shims",
   "plugin-bridge",
   "traffic-log",

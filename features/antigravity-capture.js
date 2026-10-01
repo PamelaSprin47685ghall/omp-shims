@@ -140,15 +140,14 @@ export function install(config, context) {
     };
   }
 
-  return addFetchHandler((input, init, originalFetch) => {
+  return addFetchHandler((input, init, next) => {
     const url = requestUrl(input);
-    if (!isCloudCodeStream(url, extraHosts)) return undefined;
+    if (!isCloudCodeStream(url, extraHosts)) return next(input, init);
 
     const bodyString = requestBody(input, init);
-    if (bodyString === undefined) return undefined;
-    const upstream = this;
+    if (bodyString === undefined) return next(input, init);
 
-    return originalFetch.call(upstream, input, init).then((response) => {
+    return next(input, init).then((response) => {
       const startedAt = performance.now();
       if (!response.body) {
         response

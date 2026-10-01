@@ -75,10 +75,11 @@ export function install(config, context) {
     return JSON.stringify(parsed);
   }
 
-  return addFetchHandler((input, init, originalFetch) => {
+  return addFetchHandler((input, init, next) => {
     const url = requestUrl(input);
-    if (!isCloudCodeStream(url, extraHosts)) return undefined;
+    if (!isCloudCodeStream(url, extraHosts)) return next(input, init);
 
-    return rewriteRequestBody(originalFetch, this, input, init, route);
+    // rewriteRequestBody returns undefined when there is nothing to rewrite.
+    return rewriteRequestBody(next, input, init, route) ?? next(input, init);
   });
 }

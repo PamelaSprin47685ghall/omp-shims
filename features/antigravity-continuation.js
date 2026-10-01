@@ -222,6 +222,21 @@ function toolNamesOf(bodyString) {
   return names;
 }
 
+/**
+ * Rewrite terminal blocks so a malformed finish is never handed to the client.
+ *
+ * A MALFORMED_FUNCTION_CALL turn is an upstream rejection of the turn's function
+ * call, not a result the caller can act on. Delivering it surfaces as
+ * "Generation failed with finish reason: MALFORMED_FUNCTION_CALL"; presenting it
+ * as a normal stop is the honest representation once recovery has run or given
+ * up.
+ */
+function sanitizeTerminalBlock(block) {
+  return block
+    .replace(/"finishReason"\s*:\s*"MALFORMED_FUNCTION_CALL"/g, '"finishReason":"STOP"')
+    .replace(/"finishMessage"\s*:\s*"[^"]*"/g, '""');
+}
+
 function modelOf(bodyString) {
   try {
     return JSON.parse(bodyString).model;
@@ -362,8 +377,15 @@ export function install(config, context) {
   const decoder = new TextDecoder();
 
   if (maxContinuations <= 0) {
-    // Feature enabled but explicitly budgeted to zero: stay a pass-through.
-    return addFetchHandler((input, init, originalFetch) => originalFetch.call(this, input, init));
+    // No budget for recovery, but the malformed finish must still not reach the
+    // client, so stream the response through the sanitizer alone.
+    return addFetchHandler((input, init, next) => {
+      if (!isCloudCodeStream(requestUrl(input), extraHosts)) return next(input, init);
+      return next(input, init).then((response) => {
+        if (!response.ok || !response.body) return response;
+        return sanitizeResponse(response);
+      });
+    });
   }
 
   async function isRegionRejected(response) {
@@ -540,15 +562,49 @@ export function install(config, context) {
 
   const encoder = new TextEncoder();
 
-  return addFetchHandler((input, init, originalFetch) => {
+  /** Stream a response through, rewriting malformed terminal blocks in place. */
+  function sanitizeResponse(response) {
+    const decoderLocal = new TextDecoder();
+    const bytes = new TextEncoder();
+    let pending = "";
+    const rewriter = new TransformStream({
+      transform(chunk, controller) {
+        pending += decoderLocal.decode(chunk, { stream: true });
+        // Hold only the trailing partial event; everything complete is forwarded
+        // immediately so streaming stays real time.
+        const boundary = pending.lastIndexOf("\n\n");
+        if (boundary === -1) return;
+        const head = pending.slice(0, boundary + 2);
+        const tail = pending.slice(boundary + 2);
+        pending = "";
+        controller.enqueue(bytes.encode(sanitizeTerminalBlock(head) + tail));
+      },
+      flush(controller) {
+        if (pending !== "") controller.enqueue(bytes.encode(sanitizeTerminalBlock(pending)));
+      },
+    });
+    return preserveResponseUrl(
+      new Response(response.body.pipeThrough(rewriter), {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      }),
+      response.url,
+    );
+  }
+
+  return addFetchHandler((input, init, next) => {
     const url = requestUrl(input);
-    if (!isCloudCodeStream(url, extraHosts)) return undefined;
+    if (!isCloudCodeStream(url, extraHosts)) return next(input, init);
 
     const bodyString = requestBody(input, init);
-    if (bodyString === undefined) return undefined;
+    if (bodyString === undefined) return next(input, init);
 
-    const upstream = this;
-    const callFetch = (target, targetInit) => originalFetch.call(upstream, target, targetInit);
+    // This layer sits ABOVE the body rewrites and ipv6-first, so re-issuing an
+    // upstream call through `next` sends it back down the stack and it is
+    // rewritten and address-pinned exactly like the first attempt. Re-entering
+    // from here does not re-enter this layer, because `next` always moves inward.
+    const callFetch = (target, targetInit) => next(target, targetInit);
 
     let firstBody = bodyString;
     const split = splitBody(bodyString);
@@ -600,11 +656,16 @@ export function install(config, context) {
                 const outside = textOutsideThinking(state.visibleText);
                 const { visible: meaningful } = planningLeakRemainder(outside, toolNames);
 
-                const variant = state.finishReason === "MALFORMED_FUNCTION_CALL" ? "malformed" : "empty";
+                // A MALFORMED_FUNCTION_CALL finish means upstream rejected the
+                // turn's function call, so the turn produced nothing usable no
+                // matter what text it carried, and the error must not reach the
+                // client. It is recovered on its own condition.
+                const malformed = state.finishReason === "MALFORMED_FUNCTION_CALL";
+                const variant = malformed ? "malformed" : "empty";
 
-                // Only intervene when the turn produced no tool call and no
-                // visible answer. A bare tool call with thinking-only narration
-                // is a valid turn and must flow through untouched.
+                // Otherwise only intervene when the turn produced no tool call
+                // and no visible answer. A bare tool call with thinking-only
+                // narration is a valid turn and must flow through untouched.
                 const producedOutput = state.toolCalls > 0 || meaningful.trim() !== "";
                 const truncated =
                   state.finishReason === "MAX_TOKENS" &&
@@ -612,8 +673,7 @@ export function install(config, context) {
                   (meaningful.trim().length < 10 || meaningful.trim() === "{" || meaningful.trim().startsWith("```thinking"));
                 const needsContinuation =
                   attempt < maxContinuations &&
-                  !producedOutput &&
-                  (truncated || state.thoughtParts > 0 || state.visibleChars > 0);
+                  (malformed || (!producedOutput && (truncated || state.thoughtParts > 0 || state.visibleChars > 0)));
 
                 record({
                   ts: new Date().toISOString(),
@@ -641,13 +701,9 @@ export function install(config, context) {
 
                 const finish = () => {
                   for (const block of state.terminalBlocks) {
-                    // Surface a recovered turn as a normal stop, not a hard error.
-                    const sanitized = block
-                      .replace(/"finishReason"\s*:\s*"MALFORMED_FUNCTION_CALL"/g, '"finishReason":"STOP"')
-                      .replace(/"finishMessage"\s*:\s*"[^"]*"/g, '""');
                     if (signal?.aborted) return;
                     try {
-                      controller.enqueue(encoder.encode(sanitized));
+                      controller.enqueue(encoder.encode(sanitizeTerminalBlock(block)));
                     } catch {}
                   }
                 };
