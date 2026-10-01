@@ -46,6 +46,7 @@ const LOAD_ORDER = [
   // Fetch layers, outermost first. The order IS the design: a layer's re-issued
   // calls travel back down the stack, so anything a retry needs must sit below
   // the layer that retries.
+  "tool-id-hash",                   // put the client's tool ids back
   "antigravity-capture",            // watches the final stream
   "antigravity-continuation",       // owns the response; retries re-enter below
   "antigravity-system-instruction", // rewrite the outgoing envelope

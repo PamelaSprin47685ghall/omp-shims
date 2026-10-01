@@ -1,7 +1,7 @@
 {
   "name": "omp-shims",
   "version": "1.0.0",
-  "description": "Portable, individually switchable compatibility shims for the OMP auth-gateway (plugin bridge, Antigravity request repair, IPv6-first fetch, traffic logging).",
+  "description": "Portable, individually switchable compatibility shims for the OMP auth-gateway (plugin bridge, tool-id hashing, Antigravity request repair, IPv6-first fetch, traffic logging).",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -26,6 +26,8 @@
     "index.js",
     "preload.js",
     "registry-capture.js",
+    "lib/id-map.js",
+    "lib/inbound.js",
     "lib/",
     "features/",
     "vendor/",

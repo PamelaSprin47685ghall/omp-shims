@@ -18,6 +18,7 @@ way on every machine.
 | `antigravity-routing` | Routes Gemini 3.6/3.7/3.8 Flash to the upstream `-tiered` models with a thinking level. |
 | `antigravity-continuation` | Recovers turns that end thought-only, malformed, or truncated, by replaying them as a real continuation. |
 | `antigravity-capture` | Writes Antigravity stream diagnostics to a JSONL file. |
+| `tool-id-hash` | Prefixes every inbound tool-call id with a hash8, and restores the client's ids on the way out, so upstream stops rejecting calls whose ids collide in their first nine characters. |
 | `traffic-log` | Logs every inbound gateway request to hourly-rolling files. |
 | `native-loop-guard` | OMP's own thinking-loop guard. **Off by default** and not compensated here. |
 
@@ -79,6 +80,7 @@ Feature selection lives in `~/.omp/shims.json` (override the path with
     "ipv6-first": { "enabled": true },
     "antigravity-routing": { "enabled": true, "effort": "high" },
     "antigravity-continuation": { "enabled": true, "maxContinuations": 3 },
+    "tool-id-hash": { "enabled": true },
     "traffic-log": { "enabled": true },
     "native-loop-guard": { "enabled": false }
   }
@@ -110,6 +112,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | `plugin-bridge` | `OMP_SHIMS_PLUGIN_BRIDGE` |
 | `vendor-shims` | `OMP_SHIMS_VENDOR_SHIMS` |
 | `native-loop-guard` | `OMP_SHIMS_NATIVE_LOOP_GUARD` |
+| `tool-id-hash` | `OMP_SHIMS_TOOL_ID_HASH` |
 | `traffic-log` | `OMP_SHIMS_TRAFFIC_LOG` |
 
 Per-feature settings can also be given directly, for example
@@ -142,6 +145,40 @@ path), and `sqlite` (a file plus a query returning one text column). Omit a
 provider entirely to let OMP resolve its own credential.
 
 These tokens are applied in memory. They do not touch the credential database.
+
+## Tool-call id collisions
+
+Some providers reject two tool calls whose ids share their first nine characters
+when those nine are alphanumeric. Clients mint ids like `call_0000000000000001`
+and `call_0000000000000002`, which collide, so the second call fails with a
+stream that dies part-way through.
+
+`tool-id-hash` fixes this. Every id in the inbound request is prefixed with a
+hash8 derived from the id, and the response is walked to put the client's own ids
+back, so the client is unaware anything happened.
+
+Two properties make the prefix safe:
+
+* eight base64 characters carry 48 bits, so two distinct ids essentially never
+  share a prefix; and
+* the separator after the prefix is not alphanumeric, so even a stricter
+  nine-character comparison never sees nine alphanumeric characters.
+
+Measured on the affected model: a shared alphanumeric prefix of 8 passes, 9 or
+more fails, and content past the ninth character is never consulted.
+
+The transform is deliberately not idempotent, because an id that merely looks
+hashed may still be one a client minted, and structured ids such as
+`chatcmpl-tool-x000` collide precisely because they look regular. Pairing is
+unaffected: every occurrence of the same id inside a request is transformed
+identically, so an assistant tool call and the tool result answering it always
+match.
+
+Change the salt to re-key ids:
+
+```sh
+Environment="OMP_SHIMS_TOOL_ID_SALT=change-me"
+```
 
 ## Upgrading
 
