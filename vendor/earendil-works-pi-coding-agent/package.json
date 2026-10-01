@@ -1,0 +1,13 @@
+{
+  "name": "@earendil-works/pi-coding-agent",
+  "version": "0.99.2",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    }
+  }
+}

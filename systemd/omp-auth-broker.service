@@ -1,0 +1,24 @@
+[Unit]
+Description=Oh My Pi Auth Broker
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment="NODE_OPTIONS=--no-network-family-autoselection"
+
+# Same preload as the gateway so both processes resolve credentials and network
+# behaviour identically.
+# @SHIMS_PRELOAD@
+
+ExecStart=@OMP_BIN@ auth-broker serve --bind=127.0.0.1:8765
+Restart=always
+RestartSec=3
+KillMode=process
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+[Unit]
+Description=Oh My Pi Auth Gateway
+After=network.target omp-auth-broker.service
+Wants=omp-auth-broker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=OMP_AUTH_BROKER_URL=http://127.0.0.1:8765
+Environment="NODE_OPTIONS=--no-network-family-autoselection"
+
+# Load every enabled shim from the omp-shims plugin. Feature selection lives in
+# ~/.omp/shims.json, so this line never changes between deployments.
+# @SHIMS_PRELOAD@
+
+# Optional per-feature overrides (uncomment what you need):
+# Environment="OMP_SHIMS_AG_HASH_SALT=change-me"
+# Environment="OMP_SHIMS_AG_CONTINUE_MAX=3"
+# Environment="OMP_SHIMS_AG_LOCATION_RETRIES=3"
+# Environment="OMP_SHIMS_AG_EFFORT=high"
+# Environment="OMP_SHIMS_AG_CAPTURE_SAMPLE=25"
+# Environment="OMP_SHIMS_TRAFFIC_LOG_DIR=$HOME/.omp/gateway-logs"
+#
+# Do not put provider API keys here. Use `omp /login`, which writes to the
+# agent's credential store where the gateway already looks.
+
+ExecStart=@OMP_BIN@ auth-gateway serve --bind=127.0.0.1:4000
+Restart=always
+RestartSec=3
+KillMode=process
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

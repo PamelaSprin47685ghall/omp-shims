@@ -1,0 +1,10 @@
+{
+  "name": "@earendil-works/pi-ai",
+  "version": "0.99.2",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./compat": "./compat.js"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "omp-shims",
+  "version": "1.0.0",
+  "description": "Portable, individually switchable compatibility shims for the OMP auth-gateway (plugin bridge, Antigravity request repair, IPv6-first fetch, traffic logging).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./preload": "./preload.js",
+    "./config": "./lib/config.js"
+  },
+  "pi": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "omp": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "bin": {
+    "omp-shims": "./bin/omp-shims.js"
+  },
+  "files": [
+    "index.js",
+    "preload.js",
+    "registry-capture.js",
+    "lib/",
+    "features/",
+    "vendor/",
+    "systemd/",
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "license": "MIT",
+  "private": false,
+  "repository": "https://github.com/PamelaSprin47685ghall/omp-shims",
+  "homepage": "https://github.com/PamelaSprin47685ghall/omp-shims#readme",
+  "bugs": {
+    "url": "https://github.com/PamelaSprin47685ghall/omp-shims/issues"
+  },
+  "keywords": [
+    "oh-my-pi",
+    "omp",
+    "pi",
+    "auth-gateway",
+    "plugin",
+    "shim",
+    "antigravity",
+    "kiro",
+    "commandcode"
+  ]
+}
