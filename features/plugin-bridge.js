@@ -191,13 +191,26 @@ const PLACEHOLDER_KEYS = new Set([
   "COMMANDCODE_API_KEY",
 ]);
 
+/**
+ * Retry budget handed to a provider transport.
+ *
+ * Providers implement their own retry -- Command Code retries 429 and 5xx with
+ * exponential backoff and honours Retry-After -- but default it to zero, and the
+ * host does not pass a budget. The result is that a transient capacity error
+ * reaches the caller on the first response instead of being retried. Supplying
+ * the budget here turns on the provider's own implementation rather than
+ * reimplementing it, and no provider source is touched.
+ */
+const DEFAULT_MAX_RETRIES = 3;
+
 function wrapTransportEvents(transport) {
   return function wrappedStreamSimple(model, context, options) {
+    const next = { ...options };
     // pi plugins pass `$ENV_KEY` placeholders for "resolve this yourself". OMP
     // would send the literal string as the bearer token, so drop it and let the
     // host resolve the real credential.
-    const next =
-      options && PLACEHOLDER_KEYS.has(options.apiKey) ? { ...options, apiKey: undefined } : options;
+    if (PLACEHOLDER_KEYS.has(next.apiKey)) next.apiKey = undefined;
+    if (next.maxRetries === undefined) next.maxRetries = DEFAULT_MAX_RETRIES;
     const stream = transport(model, context, next);
     if (!stream || typeof stream.push !== "function") return stream;
 
