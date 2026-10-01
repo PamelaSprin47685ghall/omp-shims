@@ -13,8 +13,12 @@ const { features } = loadConfig();
 const { pluginBridge } = readConfigFile();
 const started = [];
 
+// Diagnostics go to stderr, never stdout. Several omp subcommands parse stdout
+// (for example `omp --version`, which the self-updater runs to verify a freshly
+// installed binary), and anything written there makes them fail to parse and
+// report a corrupt download. Logging to stderr keeps it out of the way.
 function report(message, detail) {
-  console.log(`[omp-shims] ${message}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
+  console.error(`[omp-shims] ${message}${detail ? ` ${JSON.stringify(detail)}` : ""}`);
 }
 
 report(

@@ -30,7 +30,7 @@ const { pluginBridge } = readConfigFile();
 function context() {
   return {
     log: (message, detail) => {
-      if (process.env.OMP_SHIMS_VERBOSE === "1") console.log(`[omp-shims] ${message}`, detail ?? "");
+      if (process.env.OMP_SHIMS_VERBOSE === "1") console.error(`[omp-shims] ${message}`, detail ?? "");
     },
     addFetchHandler,
     preserveResponseUrl,
@@ -51,7 +51,7 @@ async function installEnabled() {
       module.install(features[name], context());
       installed.add(name);
     } catch (error) {
-      console.warn(`[omp-shims] feature "${name}" failed to install: ${error.message}`);
+      console.error(`[omp-shims] feature "${name}" failed to install: ${error.message}`);
     }
   }
 }

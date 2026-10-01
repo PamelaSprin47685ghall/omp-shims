@@ -350,7 +350,7 @@ export function install(config, context) {
         } catch (error) {
           state.error = error.message;
         }
-        console.log(`[omp-shims] registry-state ${JSON.stringify(state)}`);
+        console.error(`[omp-shims] registry-state ${JSON.stringify(state)}`);
       }
     }
   }
