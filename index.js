@@ -13,11 +13,13 @@ import { loadConfig, describeConfig, writeConfig, FEATURES, CONFIG_PATH, readCon
 import { addFetchHandler, preserveResponseUrl } from "./lib/fetch-chain.js";
 
 const LOAD_ORDER = [
-  "ipv6-first",
+  "tool-id-hash",
+  "antigravity-capture",
+  "antigravity-continuation",
   "antigravity-system-instruction",
   "antigravity-routing",
-  "antigravity-continuation",
-  "antigravity-capture",
+  "ipv6-first",
+  "vendor-shims",
   "plugin-bridge",
   "traffic-log",
 ];
@@ -57,7 +59,11 @@ async function installEnabled() {
 }
 
 export default function ompShims(pi) {
-  void installEnabled();
+  // If preload.js has already initialized the shims (as in the auth-gateway service),
+  // do not re-install them to prevent duplicate fetch wrapping and handler inversion.
+  if (!globalThis.__OMP_SHIMS__?.started?.length) {
+    void installEnabled();
+  }
 
   pi.registerCommand?.("omp-shims", {
     description: "Show or toggle omp-shims features",
