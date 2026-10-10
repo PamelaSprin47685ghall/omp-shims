@@ -246,13 +246,13 @@ export function install(config, context) {
   log(`plugin-bridge: discovered ${packages.length} plugin(s) in ${pluginsDir}`);
 
   // Providers registered per registry instance, so a rebuild re-registers once.
-  const registered = new WeakMap();
+  const inFlight = new WeakMap();
   const tokens = new Map();
 
   async function registerInto(registry) {
-    if (registered.has(registry)) return;
-    registered.set(registry, true);
+    if (inFlight.has(registry)) return inFlight.get(registry);
 
+    const task = (async () => {
     const sources = new Set();
     for (const pkg of packages) {
       for (const entry of pkg.entries) {
@@ -353,6 +353,12 @@ export function install(config, context) {
         console.error(`[omp-shims] registry-state ${JSON.stringify(state)}`);
       }
     }
+    })().finally(() => {
+      inFlight.delete(registry);
+    });
+
+    inFlight.set(registry, task);
+    return task;
   }
 
   // `refresh` is where the gateway materializes its model table, so registering
@@ -368,14 +374,16 @@ export function install(config, context) {
       const original = proto[method];
       if (typeof original !== "function") continue;
       proto[method] = function (...args) {
-        const result = registerInto(this);
         // `getAll` is sync: run registration eagerly so the caller sees plugins
         // on its very first call, and let any async tail settle on its own.
         if (method === "getAll") {
-          result.catch(() => {});
-          return original.apply(this, args);
+          const res = original.apply(this, args);
+          registerInto(this).catch(() => {});
+          return res;
         }
-        return result.then(() => original.apply(this, args));
+        // Async refresh: run original refresh first so built-in models load,
+        // then run registerInto(this) so plugin providers override built-in ones.
+        return Promise.resolve(original.apply(this, args)).then(() => registerInto(this));
       };
     }
     log("plugin-bridge: hooked ModelRegistry refresh/getAll");
