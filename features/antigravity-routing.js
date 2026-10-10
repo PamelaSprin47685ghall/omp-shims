@@ -45,6 +45,7 @@ function resolveRoute(model, request, defaultLevel) {
 }
 
 export function install(config, context) {
+  if (config?.enabled === false) return;
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
   const extraHosts = context.extraHosts ?? [];
   const defaultLevel = EFFORT_LEVELS[String(config.effort ?? "high").toLowerCase()] ?? "HIGH";
