@@ -332,11 +332,13 @@ function buildContinuation(bodyString, state, variant) {
       .slice()
       .reverse()
       .find((part) => part.thoughtSignature && /^[A-Za-z0-9+/=]+$/.test(part.thoughtSignature))?.thoughtSignature;
-    parts.push({
-      thought: true,
-      text: state.thoughtBuffer.map((part) => part.text).join(""),
-      ...(signature ? { thoughtSignature: signature } : {}),
-    });
+    const joinedThoughts = state.thoughtBuffer.map((part) => part.text).join("");
+    if (joinedThoughts !== "" || signature) {
+      parts.push({
+        ...(joinedThoughts !== "" ? { thought: true, text: joinedThoughts } : { text: "" }),
+        ...(signature ? { thoughtSignature: signature } : {}),
+      });
+    }
     const visible = textOutsideThinking(state.visibleText);
     if (visible.length > 0) parts.push({ text: visible });
   } else {
@@ -463,11 +465,11 @@ export function install(config, context) {
             if (part.functionCall && typeof part.functionCall.name === "string" && part.functionCall.name.trim()) {
               state.toolCalls += 1;
             }
-            if (part.thought === true) {
+            if (part.thought === true || (part.thoughtSignature && !part.functionCall && (part.text === undefined || part.text === ""))) {
               state.thoughtParts += 1;
-              if (typeof part.text === "string" && part.text !== "") {
+              if ((typeof part.text === "string" && part.text !== "") || part.thoughtSignature) {
                 state.thoughtBuffer.push({
-                  text: part.text,
+                  text: typeof part.text === "string" ? part.text : "",
                   ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
                 });
               }
@@ -715,19 +717,17 @@ export function install(config, context) {
 
                 // Publish the salted marker so the client-visible transcript can
                 // be rebuilt into this exact turn + nudge pair later.
-                const marker = continuationDigest(
-                  state.thoughtBuffer.map((part) => part.text).join("") || state.visibleText || "empty_turn",
-                  variant,
-                );
-                const asThought = state.thoughtParts > 0 || state.visibleText.includes("<think") || state.visibleText.includes("```thinking");
-                const markerBlock = `data: ${JSON.stringify({
-                  response: {
-                    candidates: [
-                      { content: { role: "model", parts: [asThought ? { text: marker, thought: true } : { text: marker }] } },
-                    ],
-                  },
-                })}\n\n`;
-                if (!signal?.aborted) {
+                const thoughtText = state.thoughtBuffer.map((part) => part.text).join("");
+                if ((thoughtText !== "" || state.visibleText !== "") && !signal?.aborted) {
+                  const marker = continuationDigest(thoughtText || state.visibleText, variant);
+                  const asThought = thoughtText !== "" || state.visibleText.includes("<think") || state.visibleText.includes("```thinking");
+                  const markerBlock = `data: ${JSON.stringify({
+                    response: {
+                      candidates: [
+                        { content: { role: "model", parts: [asThought ? { text: marker, thought: true } : { text: marker }] } },
+                      ],
+                    },
+                  })}\n\n`;
                   try {
                     controller.enqueue(encoder.encode(markerBlock));
                   } catch {}

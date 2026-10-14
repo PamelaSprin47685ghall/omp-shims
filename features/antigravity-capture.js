@@ -91,7 +91,7 @@ export function install(config, context) {
         if (candidate.finishReason) stats.finishReason = candidate.finishReason;
         for (const part of candidate.content?.parts ?? []) {
           if (part.functionCall && typeof part.functionCall.name === "string" && part.functionCall.name.trim()) stats.toolCalls += 1;
-          if (part.thought === true) stats.thoughtParts += 1;
+          if (part.thought === true || (part.thoughtSignature && !part.functionCall && (part.text === undefined || part.text === ""))) stats.thoughtParts += 1;
           if (typeof part.text === "string" && part.thought !== true && part.text.trim()) stats.visibleChars += part.text.trim().length;
         }
       }
