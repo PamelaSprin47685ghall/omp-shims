@@ -38,7 +38,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 const HASH_SALT = process.env.OMP_SHIMS_AG_HASH_SALT ?? "omp-shims/antigravity-continuation/v1";
-const STREAM_IDLE_TIMEOUT_MS = 30_000;
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 0;
 const LOCATION_BACKOFF_MS = [500, 1000, 2000];
 const MIN_OUTPUT_BUDGET = 8192;
 
@@ -373,6 +373,11 @@ export function install(config, context) {
   const maxContinuations = Number.parseInt(process.env.OMP_SHIMS_AG_CONTINUE_MAX ?? String(config.maxContinuations ?? 3), 10) || 0;
   const maxLocationRetries =
     Number.parseInt(process.env.OMP_SHIMS_AG_LOCATION_RETRIES ?? String(config.locationRetries ?? 3), 10) || 0;
+  const parsedIdleTimeout = Number.parseInt(
+    process.env.OMP_SHIMS_AG_IDLE_TIMEOUT_MS ?? String(config.idleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS),
+    10,
+  );
+  const idleTimeoutMs = Number.isFinite(parsedIdleTimeout) ? parsedIdleTimeout : DEFAULT_STREAM_IDLE_TIMEOUT_MS;
   const out =
     config.out ?? process.env.OMP_SHIMS_AG_DIAG_OUT ?? join(homedir(), ".omp", "logs", "antigravity-continuation.jsonl");
   const record = (entry) => appendJsonLine(out, entry);
@@ -493,17 +498,19 @@ export function install(config, context) {
     for (;;) {
       if (signal?.aborted) return "aborted";
       const read = reader.read();
-      // Clear the guard timer on every settled read: a leaked 30s timer per
-      // chunk keeps the process event loop alive long after the response ends.
-      let timer;
-      const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Upstream stream idle timeout")), STREAM_IDLE_TIMEOUT_MS);
-      });
       let result;
-      try {
-        result = await Promise.race([read, timeout]);
-      } finally {
-        clearTimeout(timer);
+      if (idleTimeoutMs > 0) {
+        let timer;
+        const timeout = new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Upstream stream idle timeout")), idleTimeoutMs);
+        });
+        try {
+          result = await Promise.race([read, timeout]);
+        } finally {
+          clearTimeout(timer);
+        }
+      } else {
+        result = await read;
       }
       const { done, value } = result;
       if (done) break;

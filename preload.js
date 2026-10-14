@@ -54,6 +54,7 @@ const LOAD_ORDER = [
   "antigravity-capture",            // watches the final stream
   "antigravity-continuation",       // owns the response; retries re-enter below
   "antigravity-system-instruction", // rewrite the outgoing envelope
+  "cline-pin-upstream",            // pin ClinePass upstream channel
   "antigravity-routing",            // rewrite model + thinking level
   "ipv6-first",                     // innermost: pin the egress address family
 
