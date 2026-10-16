@@ -62,6 +62,9 @@ const LOAD_ORDER = [
   "vendor-shims",
   "plugin-bridge",
   "traffic-log",
+
+  // Background watchers, outside the fetch stack.
+  "kiro-credential-sync",
 ];
 
 for (const name of LOAD_ORDER) {
