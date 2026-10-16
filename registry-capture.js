@@ -56,7 +56,11 @@ const originalDefineProperty = Object.defineProperty;
 Object.defineProperty = function (target, property, descriptor) {
   // The bundle exports these through lazy getters whose backing bindings are
   // still in TDZ when the export runs; announce them once they resolve.
-  if ((property === "ModelRegistry" || property === "streamSimple") && descriptor && typeof descriptor.get === "function") {
+  if (
+    (property === "ModelRegistry" || property === "streamSimple" || property === "registerOAuthProvider") &&
+    descriptor &&
+    typeof descriptor.get === "function"
+  ) {
     const getter = descriptor.get;
     announce(property, () => getter.call(this));
     descriptor.get = function () {

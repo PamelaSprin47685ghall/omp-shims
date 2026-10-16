@@ -248,6 +248,12 @@ export function install(config, context) {
   // Providers registered per registry instance, so a rebuild re-registers once.
   const inFlight = new WeakMap();
   const tokens = new Map();
+  // Plugin OAuth registrations, applied once the host's registerOAuthProvider is
+  // captured. The auth-broker refresh path only consults the runtime OAuth
+  // registry, so a plugin provider without an entry there fails every refresh
+  // ("Unknown OAuth provider") and each request pays the failed-refresh retry.
+  const pluginOauth = new Map();
+  const registeredOauth = new Set();
 
   async function registerInto(registry) {
     if (inFlight.has(registry)) return inFlight.get(registry);
@@ -286,6 +292,9 @@ export function install(config, context) {
                   if (config.api) context.registerTransport?.(config.api, config.streamSimple);
                 }
                 registry.registerProvider(id, config, `${PLUGIN_SOURCE}:${pkg.name}`);
+                if (providerConfig.oauth && typeof providerConfig.oauth === "object") {
+                  pluginOauth.set(id, providerConfig.oauth);
+                }
                 sources.add(`${PLUGIN_SOURCE}:${pkg.name}`);
                 tokens.set(id, resolveToken(id));
                 log(`plugin-bridge: registered ${id} (${providerConfig.models?.length ?? 0} models) from ${pkg.name}`);
@@ -310,6 +319,28 @@ export function install(config, context) {
         for (const source of sources) merged.add(source);
         return sync(merged);
       };
+    }
+
+    // Bridge plugin OAuth configs into the host's runtime OAuth registry so the
+    // auth-broker's credential refresh can find them. registerProvider already
+    // does this in the agent process; the broker's refresh path resolves through
+    // the same registry but only when the entry exists before the first refresh
+    // sweep, which races the plugin load — so register eagerly here too.
+    const host = globalThis.__OMP_SHIMS_HOST__;
+    const registerOauth = host?.captured?.get("registerOAuthProvider");
+    if (typeof registerOauth === "function") {
+      for (const [id, oauth] of pluginOauth) {
+        if (registeredOauth.has(id)) continue;
+        try {
+          registerOauth({ ...oauth, id, sourceId: `${PLUGIN_SOURCE}:oauth` });
+          registeredOauth.add(id);
+          log(`plugin-bridge: registered OAuth provider ${id}`);
+        } catch (error) {
+          log(`plugin-bridge: registerOAuthProvider(${id}) failed: ${error.message}`);
+        }
+      }
+    } else {
+      log("plugin-bridge: host registerOAuthProvider unavailable; OAuth refresh left to registerProvider");
     }
 
     // Credentials are supplied in memory through the key store, so nothing is
