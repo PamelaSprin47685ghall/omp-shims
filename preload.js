@@ -68,6 +68,12 @@ const LOAD_ORDER = [
   "kiro-credential-sync",
 ];
 
+globalThis.__OMP_SHIMS__ = {
+  features,
+  started,
+  names: Object.keys(FEATURES),
+};
+
 for (const name of LOAD_ORDER) {
   const entry = features[name];
   if (!entry?.enabled) continue;
@@ -80,11 +86,5 @@ for (const name of LOAD_ORDER) {
     console.warn(`[omp-shims] feature "${name}" failed to install: ${error.message}`);
   }
 }
-
-globalThis.__OMP_SHIMS__ = {
-  features,
-  started,
-  names: Object.keys(FEATURES),
-};
 
 report(`installed: ${started.join(", ") || "none"}`);

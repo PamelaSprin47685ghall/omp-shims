@@ -26,6 +26,7 @@ const LOAD_ORDER = [
 ];
 
 const installed = new Set();
+let installing = false;
 
 // Token specs live outside `features`, so read them once here.
 const { pluginBridge } = readConfigFile();
@@ -43,7 +44,14 @@ function context() {
 }
 
 async function installEnabled() {
+  if (installing || globalThis.__OMP_SHIMS__?.started !== undefined) return;
+  installing = true;
   const { features } = loadConfig();
+  globalThis.__OMP_SHIMS__ = {
+    features,
+    started: [],
+    names: Object.keys(FEATURES),
+  };
 
   if (!features["native-loop-guard"].enabled) process.env.PI_NO_THINKING_LOOP_GUARD = "1";
 
@@ -53,6 +61,7 @@ async function installEnabled() {
       const module = await import(`./features/${name}.js`);
       module.install(features[name], context());
       installed.add(name);
+      globalThis.__OMP_SHIMS__.started.push(name);
     } catch (error) {
       console.error(`[omp-shims] feature "${name}" failed to install: ${error.message}`);
     }
@@ -62,7 +71,7 @@ async function installEnabled() {
 export default function ompShims(pi) {
   // If preload.js has already initialized the shims (as in the auth-gateway service),
   // do not re-install them to prevent duplicate fetch wrapping and handler inversion.
-  if (!globalThis.__OMP_SHIMS__?.started?.length) {
+  if (!installing && globalThis.__OMP_SHIMS__?.started === undefined) {
     void installEnabled();
   }
 

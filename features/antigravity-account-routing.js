@@ -145,6 +145,21 @@ export function install(config, context) {
   log("antigravity-account-routing: enabled (sequential drain)", { ultraEmails, proEmails, cooldownMs });
 
   return addFetchHandler(async (input, init, next) => {
+    try {
+      return await routeRequest(input, init, next);
+    } catch (error) {
+      // A transport failure inside one candidate attempt (broker unreachable,
+      // upstream connection reset, a continuation stream erroring) must not
+      // reject the caller's fetch: fall through to the gateway's own
+      // credential resolution so the request still completes on the normal
+      // path instead of surfacing an unhandled rejection to the client.
+      if (init?.signal?.aborted || input?.signal?.aborted) throw error;
+      log(`antigravity-account-routing: candidate attempt threw; falling back to gateway credential: ${error?.message ?? error}`);
+      return next(input, init);
+    }
+  });
+
+  async function routeRequest(input, init, next) {
     const url = requestUrl(input);
     if (!isCloudCodeStream(url, extraHosts)) return next(input, init);
 
@@ -305,5 +320,5 @@ export function install(config, context) {
     }
 
     return lastResponse;
-  });
+  }
 }
