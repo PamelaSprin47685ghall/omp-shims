@@ -160,14 +160,22 @@ export function install(config, context) {
     const model = parsed.model;
     if (typeof model !== "string") return next(input, init);
 
-    // Refresh accounts cache if empty or stale (> 30s)
+    // Refresh accounts cache if empty or stale (> 30s). Preserve any broker-
+    // refreshed token/expiry from the in-memory cache so a reload does not
+    // revert to a stale agent.db snapshot and force a redundant per-request
+    // refresh (which added seconds of latency when tokens were near expiry).
     if (cachedAccounts.length === 0 || Date.now() - lastAccountsFetch > 30_000) {
       if (existsSync(agentDbPath)) {
         const fresh = loadAccounts(agentDbPath, ultraEmails, proEmails);
         for (const acc of fresh) {
           const prev = cachedAccounts.find((p) => p.id === acc.id);
-          if (prev?.cooldownUntil && prev.cooldownUntil > Date.now()) {
-            acc.cooldownUntil = prev.cooldownUntil;
+          if (!prev) continue;
+          if (prev.cooldownUntil > Date.now()) acc.cooldownUntil = prev.cooldownUntil;
+          // Keep the freshest token: prefer the in-memory (possibly broker-
+          // refreshed) one over the static agent.db snapshot.
+          if (prev.token && (!acc.token || prev.expires > acc.expires)) {
+            acc.token = prev.token;
+            acc.expires = prev.expires;
           }
         }
         cachedAccounts = fresh;
