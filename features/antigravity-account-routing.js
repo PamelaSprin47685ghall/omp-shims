@@ -2,10 +2,12 @@
 // - Gemini 4, Claude Opus, and Claude Sonnet always route to Ultra account(s).
 // - Other models (e.g. Gemini 3.8 Flash, 3.5 Flash Lite) prioritize Pro accounts,
 //   falling back to Ultra if all Pro accounts fail (429 quota exhaustion or error).
+// - Sequential drain order: within each tier, exhaust one account completely
+//   (until 429 quota exhausted) before advancing to the next. No round-robin.
 //
 // Accounts are read from agent.db and automatically refreshed via the broker
-// when near expiry. Pro accounts are round-robin balanced; an account returning
-// 429 is placed in cooldown so subsequent requests avoid wasting round trips.
+// when near expiry. An account returning 429 is placed in cooldown so subsequent
+// requests avoid wasting round trips and immediately stick to the next account.
 //
 // Config (~/.omp/shims.json):
 //   "antigravity-account-routing": {
@@ -31,7 +33,6 @@ const DEFAULT_ULTRA_PATTERN = /gemini-4|opus|sonnet/i;
 
 let cachedAccounts = [];
 let lastAccountsFetch = 0;
-let proCursor = 0;
 
 function getBrokerToken() {
   const tokenPath = join(homedir(), ".omp", "auth-broker.token");
@@ -40,6 +41,35 @@ function getBrokerToken() {
   } catch {
     return "";
   }
+}
+
+function parseCooldownMs(bodyText, defaultMs) {
+  if (!bodyText) return defaultMs;
+  const secMatch = bodyText.match(/"(?:quotaResetDelay|retryDelay)"\s*:\s*"([0-9.]+)(?:s)?"/i);
+  if (secMatch) {
+    const sec = Number.parseFloat(secMatch[1]);
+    if (Number.isFinite(sec) && sec > 0) return Math.min(sec * 1000, 86_400_000);
+  }
+  const resetsMatch = bodyText.match(/Resets in\s*(?:([0-9]+)h)?\s*(?:([0-9]+)m)?\s*(?:([0-9]+)s)?/i);
+  if (resetsMatch && (resetsMatch[1] || resetsMatch[2] || resetsMatch[3])) {
+    const hours = Number.parseInt(resetsMatch[1] || "0", 10);
+    const mins = Number.parseInt(resetsMatch[2] || "0", 10);
+    const secs = Number.parseInt(resetsMatch[3] || "0", 10);
+    const totalMs = (hours * 3600 + mins * 60 + secs) * 1000;
+    if (totalMs > 0) return Math.min(totalMs, 86_400_000);
+  }
+  return defaultMs;
+}
+
+function sortByConfiguredOrder(accounts, emailOrder) {
+  return [...accounts].sort((a, b) => {
+    const idxA = emailOrder.indexOf(a.email.toLowerCase());
+    const idxB = emailOrder.indexOf(b.email.toLowerCase());
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    return a.id - b.id;
+  });
 }
 
 function loadAccounts(dbPath, ultraList, proList) {
@@ -112,7 +142,7 @@ export function install(config, context) {
   const out = config.out ?? process.env.OMP_SHIMS_AG_ACCOUNTS_OUT ?? join(homedir(), ".omp", "logs", "antigravity-accounts.jsonl");
   const record = (entry) => appendJsonLine(out, entry);
 
-  log("antigravity-account-routing: enabled", { ultraEmails, proEmails, cooldownMs });
+  log("antigravity-account-routing: enabled (sequential drain)", { ultraEmails, proEmails, cooldownMs });
 
   return addFetchHandler(async (input, init, next) => {
     const url = requestUrl(input);
@@ -149,46 +179,74 @@ export function install(config, context) {
 
     const brokerToken = getBrokerToken();
     const isUltraRequired = ultraPattern.test(model);
+    const now = Date.now();
+
+    const ultras = sortByConfiguredOrder(cachedAccounts.filter((a) => a.isUltra), ultraEmails);
+    const pros = sortByConfiguredOrder(cachedAccounts.filter((a) => a.isPro), proEmails);
 
     if (isUltraRequired) {
-      // Always route to Ultra account(s)
-      const ultras = cachedAccounts.filter((a) => a.isUltra);
-      if (ultras.length === 0) return next(input, init);
+      // Ultra models (Gemini 4, Opus, Sonnet):
+      // Exhaust Ultra accounts sequentially (use ultra1 until 429, then ultra2, etc.)
+      const availableUltras = ultras.filter((a) => now >= a.cooldownUntil);
+      const candidates = availableUltras.length > 0 ? availableUltras : ultras;
+      if (candidates.length === 0) return next(input, init);
 
-      const ultra = ultras.find((a) => Date.now() >= a.cooldownUntil) ?? ultras[0];
-      await refreshAccountToken(ultra, brokerToken);
+      let lastResponse;
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        await refreshAccountToken(candidate, brokerToken);
 
-      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-      headers.set("Authorization", `Bearer ${ultra.token}`);
-      log(`antigravity-account-routing: model "${model}" -> ultra (${ultra.email})`);
-      const response = await next(input, { ...init, headers });
-      record({ ts: new Date().toISOString(), event: "account-route", model, account: ultra.email, tier: "ultra", status: response.status });
-      return response;
-    }
-
-    // Pro model (e.g. Gemini 3.8 Flash):
-    // Prioritize Pro accounts, fallback to Ultra if all Pro fail.
-    const pros = cachedAccounts.filter((a) => a.isPro);
-    const ultras = cachedAccounts.filter((a) => a.isUltra);
-
-    if (pros.length === 0) {
-      if (ultras.length > 0) {
-        await refreshAccountToken(ultras[0], brokerToken);
         const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-        headers.set("Authorization", `Bearer ${ultras[0].token}`);
-        return next(input, { ...init, headers });
+        headers.set("Authorization", `Bearer ${candidate.token}`);
+
+        log(`antigravity-account-routing: model "${model}" attempt ${i + 1}/${candidates.length} -> ultra (${candidate.email})`);
+        const response = await next(input, { ...init, headers });
+
+        record({
+          ts: new Date().toISOString(),
+          event: "account-route",
+          model,
+          account: candidate.email,
+          tier: "ultra",
+          attempt: i + 1,
+          candidatesCount: candidates.length,
+          status: response.status,
+        });
+
+        if (response.status !== 429) {
+          return response;
+        }
+
+        let cooldownDuration = cooldownMs;
+        try {
+          const bodyClone = await response.clone().text();
+          cooldownDuration = parseCooldownMs(bodyClone, cooldownMs);
+        } catch {}
+        candidate.cooldownUntil = Date.now() + cooldownDuration;
+        log(
+          `antigravity-account-routing: ultra account ${candidate.email} returned 429; cooling down for ${Math.round(cooldownDuration / 1000)}s`
+        );
+
+        try {
+          await response.body?.cancel();
+        } catch {}
+
+        lastResponse = response;
       }
-      return next(input, init);
+      return lastResponse;
     }
 
-    // Round-robin starting pro account
-    const proList = [...pros];
-    const startIndex = proCursor++ % proList.length;
-    const orderedPros = [...proList.slice(startIndex), ...proList.slice(0, startIndex)];
+    // Pro models (Gemini 3.8 Flash, 3.5 Flash Lite, etc.):
+    // Sequential drain: stick to pro1 until 429, then pro2, then pro3.
+    // Only fall back to Ultra if ALL Pro accounts are in cooldown / fail.
+    const availablePros = pros.filter((a) => now >= a.cooldownUntil);
+    const availableUltras = ultras.filter((a) => now >= a.cooldownUntil);
 
-    const now = Date.now();
-    const availablePros = orderedPros.filter((a) => now >= a.cooldownUntil);
-    const candidates = [...(availablePros.length > 0 ? availablePros : orderedPros), ...ultras];
+    // Candidates in strict priority order: available pros first, then fallback ultras
+    const candidates = [
+      ...(availablePros.length > 0 ? availablePros : pros),
+      ...(availableUltras.length > 0 ? availableUltras : ultras),
+    ];
 
     let lastResponse;
     for (let i = 0; i < candidates.length; i++) {
@@ -203,6 +261,7 @@ export function install(config, context) {
       );
 
       const response = await next(input, { ...init, headers });
+
       record({
         ts: new Date().toISOString(),
         event: "account-route",
@@ -214,14 +273,21 @@ export function install(config, context) {
         status: response.status,
       });
 
-      // If successful or non-quota status, return immediately
+      // If successful or non-quota status, return immediately (sticks to this account)
       if (response.status !== 429) {
         return response;
       }
 
-      // 429: quota exhausted for this account, mark cooldown and try next candidate
-      candidate.cooldownUntil = Date.now() + cooldownMs;
-      log(`antigravity-account-routing: account ${candidate.email} returned 429; cooling down for ${cooldownMs}ms`);
+      // 429: account quota exhausted, set cooldown and advance to next account
+      let cooldownDuration = cooldownMs;
+      try {
+        const bodyClone = await response.clone().text();
+        cooldownDuration = parseCooldownMs(bodyClone, cooldownMs);
+      } catch {}
+      candidate.cooldownUntil = Date.now() + cooldownDuration;
+      log(
+        `antigravity-account-routing: account ${candidate.email} returned 429; cooling down for ${Math.round(cooldownDuration / 1000)}s`
+      );
 
       try {
         await response.body?.cancel();
