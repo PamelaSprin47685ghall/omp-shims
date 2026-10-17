@@ -52,6 +52,7 @@ const LOAD_ORDER = [
   // the layer that retries.
   "tool-id-hash",                   // put the client's tool ids back
   "antigravity-capture",            // watches the final stream
+  "antigravity-account-routing",    // route by model tier (Gemini 4/Opus/Sonnet -> Ultra; others -> Pro with fallback)
   "antigravity-continuation",       // owns the response; retries re-enter below
   "antigravity-system-instruction", // rewrite the outgoing envelope
   "cline-pin-upstream",            // pin ClinePass upstream channel
