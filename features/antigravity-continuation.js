@@ -754,9 +754,10 @@ export function install(config, context) {
                 }
               }
             } catch (error) {
-              record({ ts: new Date().toISOString(), event: "continuation-failed", url, error: String(error?.stack ?? error) });
+              const detail = error instanceof Error ? String(error.stack ?? error) : String(error);
+              record({ ts: new Date().toISOString(), event: "continuation-failed", url, error: detail || "(empty error thrown)" });
               try {
-                controller.error(error);
+                controller.error(error instanceof Error ? error : new Error(detail || "continuation stream failed"));
               } catch {}
             } finally {
               if (attempts.length > 0) {

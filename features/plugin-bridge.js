@@ -149,6 +149,7 @@ function discoverPlugins(pluginsDir) {
 
   const packages = [];
   for (const name of Object.keys(manifest.dependencies ?? {})) {
+    if (name === "omp-shims") continue;
     const packageDir = join(pluginsDir, "node_modules", name);
     if (!existsSync(packageDir)) continue;
     const entries = entryPointsOf(packageDir, readManifestSafe(join(packageDir, "package.json")));
