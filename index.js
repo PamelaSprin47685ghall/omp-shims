@@ -15,6 +15,7 @@ import { addFetchHandler, preserveResponseUrl } from "./lib/fetch-chain.js";
 const LOAD_ORDER = [
   "tool-id-hash",
   "antigravity-capture",
+  "antigravity-account-routing",
   "antigravity-continuation",
   "antigravity-system-instruction",
   "antigravity-routing",
