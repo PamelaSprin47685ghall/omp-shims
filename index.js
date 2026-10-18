@@ -18,6 +18,7 @@ const LOAD_ORDER = [
   "antigravity-account-routing",
   "antigravity-continuation",
   "antigravity-system-instruction",
+  "cline-pin-upstream",
   "antigravity-routing",
   "ipv6-first",
   "vendor-shims",
