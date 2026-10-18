@@ -1,16 +1,19 @@
-// ClinePass: pin every chat/completions request to a fixed upstream channel.
+// ClinePass: pin chat/completions requests to fixed upstream channels (providerOptions.gateway.only)
+// and ensure proper headers / API keys for Cline.
 //
 // Cline's gateway routes subscription models through Vercel AI Gateway
 // ("planner" pipeline). The only pin that survives there is a top-level
 // `providerOptions.gateway.only` array; top-level `provider.only` is dropped.
-// This feature rewrites the outgoing body so every cline request carries the
-// pin. Channel slugs come from the gateway's own routing metadata
-// (provider_metadata.gateway.routing.finalProvider / affinity.pinnedProvider).
+//
+// Default per-model channels:
+//   deepseek-v4.1-flash -> deepseek
+//   others -> openai-compatible-private (or fallback)
 //
 // Env:
 //   OMP_SHIMS_CLINE_PIN_HOST      default api.cline.bot
 //   OMP_SHIMS_CLINE_PIN_UPSTREAM  default openai-compatible-private
 //   OMP_SHIMS_CLINE_PIN_MODELS    optional comma list; empty = all models
+//   OMP_SHIMS_CLINE_API_KEY       default ClinePass API key
 
 import {
   addFetchHandler as sharedAddFetchHandler,
@@ -18,10 +21,20 @@ import {
   requestBody,
 } from "../lib/fetch-chain.js";
 
+const DEFAULT_MODEL_CHANNELS = {
+  "deepseek-v4.1-flash": ["deepseek"],
+  "cline-pass/deepseek-v4.1-flash": ["deepseek"],
+};
+
 export function install(config, context) {
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
   const target = config.host ?? process.env.OMP_SHIMS_CLINE_PIN_HOST ?? "api.cline.bot";
-  const upstream = config.upstream ?? process.env.OMP_SHIMS_CLINE_PIN_UPSTREAM ?? "openai-compatible-private";
+  const defaultUpstream = config.upstream ?? process.env.OMP_SHIMS_CLINE_PIN_UPSTREAM ?? "openai-compatible-private";
+  const apiKey = config.apiKey ?? process.env.OMP_SHIMS_CLINE_API_KEY ?? "sk_5f4a7a2e7f38fbf6f3355dfac1b7802500415f1c8c7faff74cd04ec9a8f4a5d0";
+  const modelChannels = {
+    ...DEFAULT_MODEL_CHANNELS,
+    ...(config.modelChannels ?? {}),
+  };
   const modelFilter = (config.models ?? process.env.OMP_SHIMS_CLINE_PIN_MODELS ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -44,19 +57,46 @@ export function install(config, context) {
 
     if (modelFilter.length > 0 && !modelFilter.includes(parsed.model)) return next(input, init);
 
-    // Idempotent: never clobber a more specific existing pin.
-    const existing = parsed.providerOptions?.gateway?.only;
-    if (Array.isArray(existing) && existing.length > 0) return next(input, init);
+    // Determine channel for model
+    const model = parsed.model ?? "";
+    const strippedModel = model.startsWith("cline-pass/") ? model.slice("cline-pass/".length) : model;
+    const targetChannels =
+      modelChannels[model] ??
+      modelChannels[strippedModel] ??
+      (Array.isArray(defaultUpstream) ? defaultUpstream : [defaultUpstream]);
 
-    parsed.providerOptions = { gateway: { only: [upstream] } };
+    // If caller didn't provide specific pin, inject it
+    const existing = parsed.providerOptions?.gateway?.only;
+    if (!Array.isArray(existing) || existing.length === 0) {
+      parsed.providerOptions = {
+        ...(parsed.providerOptions ?? {}),
+        gateway: {
+          ...(parsed.providerOptions?.gateway ?? {}),
+          only: targetChannels,
+        },
+      };
+    }
+
     const rewritten = JSON.stringify(parsed);
 
+    // Ensure headers include Authorization (if configured) and standard Cline headers
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    if (apiKey && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${apiKey}`);
+    }
+    if (!headers.has("HTTP-Referer")) {
+      headers.set("HTTP-Referer", "https://cline.bot");
+    }
+    if (!headers.has("X-Title")) {
+      headers.set("X-Title", "Cline");
+    }
+
     if (typeof input === "string" || input instanceof URL) {
-      return next(input, { ...init, body: rewritten });
+      return next(input, { ...init, headers, body: rewritten });
     }
     return next(requestUrl(input), {
       method: init?.method ?? input.method,
-      headers: init?.headers ?? input.headers,
+      headers,
       signal: init?.signal ?? input.signal,
       body: rewritten,
     });
