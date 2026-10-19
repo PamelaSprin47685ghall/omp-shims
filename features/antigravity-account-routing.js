@@ -75,6 +75,25 @@ export function sortByConfiguredOrder(accounts, emailOrder) {
   });
 }
 
+/**
+ * Pro-model candidate order for one request.
+ *
+ * Strict priority: available pros first, then available ultras. When every pro
+ * is cooling, go straight to Ultra — re-queueing the cooled pro accounts made
+ * every request burn 3 guaranteed 429 round trips (~5-10s) before reaching
+ * the working account. When nothing is available, try the single account with
+ * the soonest cooldown expiry so the request still lands.
+ */
+export function selectProCandidates(now, pros, ultras) {
+  const availablePros = pros.filter((a) => now >= a.cooldownUntil);
+  const availableUltras = ultras.filter((a) => now >= a.cooldownUntil);
+  if (availablePros.length > 0) return [...availablePros, ...availableUltras];
+  if (availableUltras.length > 0) return [...availableUltras];
+  const all = [...pros, ...ultras];
+  if (all.length === 0) return [];
+  return [all.slice().sort((a, b) => a.cooldownUntil - b.cooldownUntil)[0]];
+}
+
 function loadAccounts(dbPath, ultraList, proList) {
   const { Database } = require_("bun:sqlite");
   const db = new Database(dbPath, { readonly: true });
@@ -281,14 +300,8 @@ export function install(config, context) {
     // Pro models (Gemini 3.8 Flash, 3.5 Flash Lite, etc.):
     // Sequential drain: stick to pro1 until 429, then pro2, then pro3.
     // Only fall back to Ultra if ALL Pro accounts are in cooldown / fail.
-    const availablePros = pros.filter((a) => now >= a.cooldownUntil);
-    const availableUltras = ultras.filter((a) => now >= a.cooldownUntil);
-
-    // Candidates in strict priority order: available pros first, then fallback ultras
-    const candidates = [
-      ...(availablePros.length > 0 ? availablePros : pros),
-      ...(availableUltras.length > 0 ? availableUltras : ultras),
-    ];
+    const candidates = selectProCandidates(now, pros, ultras);
+    if (candidates.length === 0) return next(input, init);
 
     let lastResponse;
     for (let i = 0; i < candidates.length; i++) {

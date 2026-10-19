@@ -1,10 +1,17 @@
-// Antigravity: deliver the system prompt as a leading user turn.
+// Antigravity envelope rewrites, applied to every outbound Cloud Code stream request:
 //
 // The Cloud Code Assist backend answers requests carrying a top-level
 // `request.systemInstruction` with a bogus 429 RESOURCE_EXHAUSTED even when the
 // account has quota. The identical prompt sent as a regular `user` turn is
 // accepted. Only Antigravity agent envelopes (requestType "agent") are touched,
 // so the shim is endpoint and version agnostic.
+//
+// The same layer also raises a floor on `maxOutputTokens`. Small clients
+// (title generators, some agents) send 4096; on long turns a function call
+// whose JSON arguments cross that cap is truncated mid-stream, and the Cloud
+// Code backend answers the truncated call with MALFORMED_FUNCTION_CALL. Giving
+// the first request the same headroom the continuation retries already get
+// removes that trigger instead of recovering from it after the fact.
 
 import {
   isCloudCodeStream,
@@ -13,13 +20,13 @@ import {
   addFetchHandler as sharedAddFetchHandler,
 } from "../lib/fetch-chain.js";
 
+const MIN_OUTPUT_BUDGET = 8192;
+
 export function install(_config, context) {
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
   const extraHosts = context.extraHosts ?? [];
 
-  function moveSystemPromptIntoContents(bodyString) {
-    if (!bodyString.includes('"systemInstruction"')) return undefined;
-
+  function rewriteEnvelope(bodyString) {
     let parsed;
     try {
       parsed = JSON.parse(bodyString);
@@ -28,17 +35,31 @@ export function install(_config, context) {
     }
 
     const request = parsed?.request;
-    const system = request?.systemInstruction;
-    if (!system || !Array.isArray(system.parts) || system.parts.length === 0) return undefined;
-    // Only Antigravity agent envelopes use requestType "agent".
-    if (parsed.requestType !== "agent") return undefined;
+    if (!request) return undefined;
 
-    request.contents = [
-      { role: "user", parts: system.parts },
-      ...(Array.isArray(request.contents) ? request.contents : []),
-    ];
-    delete request.systemInstruction;
-    return JSON.stringify(parsed);
+    // Only Antigravity agent envelopes use requestType "agent".
+    const isAgent = parsed.requestType === "agent";
+    let changed = false;
+
+    const system = isAgent ? request.systemInstruction : undefined;
+    if (system && Array.isArray(system.parts) && system.parts.length > 0) {
+      request.contents = [
+        { role: "user", parts: system.parts },
+        ...(Array.isArray(request.contents) ? request.contents : []),
+      ];
+      delete request.systemInstruction;
+      changed = true;
+    }
+
+    if (isAgent) {
+      const generation = request.generationConfig;
+      if (generation && typeof generation.maxOutputTokens === "number" && generation.maxOutputTokens > 0 && generation.maxOutputTokens < MIN_OUTPUT_BUDGET) {
+        generation.maxOutputTokens = MIN_OUTPUT_BUDGET;
+        changed = true;
+      }
+    }
+
+    return changed ? JSON.stringify(parsed) : undefined;
   }
 
   return addFetchHandler((input, init, next) => {
@@ -46,6 +67,6 @@ export function install(_config, context) {
     if (!isCloudCodeStream(url, extraHosts)) return next(input, init);
 
     // rewriteRequestBody returns undefined when there is nothing to rewrite.
-    return rewriteRequestBody(next, input, init, moveSystemPromptIntoContents) ?? next(input, init);
+    return rewriteRequestBody(next, input, init, rewriteEnvelope) ?? next(input, init);
   });
 }

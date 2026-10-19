@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseCooldownMs, sortByConfiguredOrder } from "../features/antigravity-account-routing.js";
+import { parseCooldownMs, selectProCandidates, sortByConfiguredOrder } from "../features/antigravity-account-routing.js";
 
 describe("parseCooldownMs", () => {
   test("reads retryDelay / quotaResetDelay seconds", () => {
@@ -26,4 +26,32 @@ test("sortByConfiguredOrder puts configured accounts first, in order", () => {
   ];
   const sorted = sortByConfiguredOrder(accounts, ["a@example.com", "b@example.com"]);
   expect(sorted.map((account) => account.id)).toEqual([3, 2, 1]);
+});
+
+describe("selectProCandidates", () => {
+  const now = 1_000_000;
+  const pro = (id, cooldownUntil) => ({ id, email: `pro${id}@example.com`, isPro: true, cooldownUntil });
+  const ultra = (id, cooldownUntil) => ({ id, email: `ultra${id}@example.com`, isUltra: true, cooldownUntil });
+
+  test("available pros come first, then available ultras", () => {
+    const pros = [pro(1, now - 1), pro(2, now + 5_000)];
+    const ultras = [ultra(9, now - 1)];
+    expect(selectProCandidates(now, pros, ultras).map((a) => a.id)).toEqual([1, 9]);
+  });
+
+  test("all pros cooling goes straight to ultra without re-trying any pro", () => {
+    const pros = [pro(1, now + 5_000), pro(2, now + 9_000), pro(3, now + 3_000)];
+    const ultras = [ultra(9, now - 1)];
+    expect(selectProCandidates(now, pros, ultras).map((a) => a.id)).toEqual([9]);
+  });
+
+  test("everything cooling keeps the single soonest-expiring account", () => {
+    const pros = [pro(1, now + 5_000), pro(2, now + 9_000)];
+    const ultras = [ultra(9, now + 7_000)];
+    expect(selectProCandidates(now, pros, ultras).map((a) => a.id)).toEqual([1]);
+  });
+
+  test("no accounts at all yields no candidates", () => {
+    expect(selectProCandidates(now, [], [])).toEqual([]);
+  });
 });

@@ -35,6 +35,22 @@ describe("antigravity-system-instruction", () => {
     expect(await sentBody(installSystemInstruction, {}, other)).toEqual(other);
     expect(await sentBody(installSystemInstruction, {}, envelope, "https://example.com/v1/chat")).toEqual(envelope);
   });
+
+  test("raises a small maxOutputTokens floor so function calls are not truncated upstream", async () => {
+    const body = await sentBody(installSystemInstruction, {}, {
+      ...envelope,
+      request: { ...envelope.request, generationConfig: { maxOutputTokens: 4096 } },
+    });
+    expect(body.request.generationConfig.maxOutputTokens).toBe(8192);
+  });
+
+  test("keeps an output budget that already clears the floor", async () => {
+    const budget = {
+      ...envelope,
+      request: { ...envelope.request, generationConfig: { maxOutputTokens: 32_000 } },
+    };
+    expect((await sentBody(installSystemInstruction, {}, budget)).request.generationConfig.maxOutputTokens).toBe(32_000);
+  });
 });
 
 describe("antigravity-routing", () => {
