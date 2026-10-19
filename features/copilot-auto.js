@@ -28,8 +28,8 @@ const AUTO_MODEL_ENTRIES = [
     api: "openai-completions",
     display_name: "Copilot Auto",
     input_modalities: ["text", "image"],
-    context_length: 128000,
-    max_output_tokens: 16384,
+    context_length: 1000000,
+    max_output_tokens: 65536,
   },
   {
     id: "github-copilot/auto",
@@ -38,8 +38,8 @@ const AUTO_MODEL_ENTRIES = [
     api: "openai-completions",
     display_name: "GitHub Copilot Auto",
     input_modalities: ["text", "image"],
-    context_length: 128000,
-    max_output_tokens: 16384,
+    context_length: 1000000,
+    max_output_tokens: 65536,
   },
   {
     id: "copilot-auto",
@@ -48,8 +48,8 @@ const AUTO_MODEL_ENTRIES = [
     api: "openai-completions",
     display_name: "Copilot Auto",
     input_modalities: ["text", "image"],
-    context_length: 128000,
-    max_output_tokens: 16384,
+    context_length: 1000000,
+    max_output_tokens: 65536,
   },
 ];
 
