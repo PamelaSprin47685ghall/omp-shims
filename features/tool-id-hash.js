@@ -93,7 +93,11 @@ function mapIds(value, transform) {
   if (Array.isArray(value.content)) {
     for (const block of value.content) {
       if (!block || typeof block !== "object") continue;
+      // A tool call's own id is `id`; its arguments are opaque and not walked.
       if (block.type === "tool_use" || block.type === "tool-call") block.id = transform(block.id);
+      // Anything else (for example an Anthropic `tool_result`) may carry the
+      // id of the call it answers, so it is walked like any other object.
+      else mapIds(block, transform);
     }
   }
 
