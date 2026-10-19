@@ -7,9 +7,8 @@
 // Types are erased at runtime; only `getAgentDir` has to behave, and it is
 // implemented from the host's own conventions rather than reimplementing pi.
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Directory holding this agent's state (credentials, caches, settings).
@@ -21,10 +20,7 @@ export function getAgentDir() {
   const override = process.env.OMP_AGENT_DIR ?? process.env.PI_AGENT_DIR;
   if (override) return override;
 
-  const home = homedir();
-  // OMP keeps agent state under ~/.omp/agent; fall back to that layout even
-  // before the directory exists, since the caller only appends a filename.
-  const ompDir = join(home, ".omp", "agent");
-  if (existsSync(ompDir)) return ompDir;
-  return ompDir;
+  // OMP keeps agent state under ~/.omp/agent. Return that layout even before
+  // the directory exists, since the caller only appends a filename.
+  return join(homedir(), ".omp", "agent");
 }

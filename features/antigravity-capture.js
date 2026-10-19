@@ -8,15 +8,15 @@
 //   OMP_SHIMS_AG_CAPTURE_OUT       output file (default ~/.omp/logs/antigravity-streams.jsonl)
 //   OMP_SHIMS_AG_CAPTURE_SAMPLE    record a summary for every Nth stream (0 = only failures)
 
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
-  addFetchHandler as sharedAddFetchHandler,
   appendJsonLine,
   isCloudCodeStream,
   requestBody,
   requestUrl,
+  addFetchHandler as sharedAddFetchHandler,
 } from "../lib/fetch-chain.js";
-import { join } from "node:path";
-import { homedir } from "node:os";
 
 const MARKERS = ["MALFORMED_FUNCTION_CALL", "malformed function call", "malformed-function-call"];
 const TAIL_BYTES = 4096;
@@ -66,8 +66,10 @@ function requestShape(bodyString) {
 export function install(config, context) {
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
   const extraHosts = context.extraHosts ?? [];
-  const out = config.out ?? process.env.OMP_SHIMS_AG_CAPTURE_OUT ?? join(homedir(), ".omp", "logs", "antigravity-streams.jsonl");
-  const sampleEvery = Number.parseInt(process.env.OMP_SHIMS_AG_CAPTURE_SAMPLE ?? String(config.sampleEvery ?? 0), 10) || 0;
+  const out =
+    config.out ?? process.env.OMP_SHIMS_AG_CAPTURE_OUT ?? join(homedir(), ".omp", "logs", "antigravity-streams.jsonl");
+  const sampleEvery =
+    Number.parseInt(process.env.OMP_SHIMS_AG_CAPTURE_SAMPLE ?? String(config.sampleEvery ?? 0), 10) || 0;
 
   const record = (entry) => appendJsonLine(out, entry);
   let streamCount = 0;
@@ -90,9 +92,15 @@ export function install(config, context) {
       for (const candidate of response.candidates ?? []) {
         if (candidate.finishReason) stats.finishReason = candidate.finishReason;
         for (const part of candidate.content?.parts ?? []) {
-          if (part.functionCall && typeof part.functionCall.name === "string" && part.functionCall.name.trim()) stats.toolCalls += 1;
-          if (part.thought === true || (part.thoughtSignature && !part.functionCall && (part.text === undefined || part.text === ""))) stats.thoughtParts += 1;
-          if (typeof part.text === "string" && part.thought !== true && part.text.trim()) stats.visibleChars += part.text.trim().length;
+          if (part.functionCall && typeof part.functionCall.name === "string" && part.functionCall.name.trim())
+            stats.toolCalls += 1;
+          if (
+            part.thought === true ||
+            (part.thoughtSignature && !part.functionCall && (part.text === undefined || part.text === ""))
+          )
+            stats.thoughtParts += 1;
+          if (typeof part.text === "string" && part.thought !== true && part.text.trim())
+            stats.visibleChars += part.text.trim().length;
         }
       }
     };
@@ -122,7 +130,13 @@ export function install(config, context) {
       },
       flush() {
         streamCount += 1;
-        const base = { ts: new Date().toISOString(), url, ms: Math.round(performance.now() - startedAt), ...requestShape(bodyString), ...stats };
+        const base = {
+          ts: new Date().toISOString(),
+          url,
+          ms: Math.round(performance.now() - startedAt),
+          ...requestShape(bodyString),
+          ...stats,
+        };
         if (markers.length > 0) {
           record({ ...base, event: "malformed-function-call", markers, tail });
           return;

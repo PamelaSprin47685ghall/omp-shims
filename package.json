@@ -7,7 +7,9 @@
   "exports": {
     ".": "./index.js",
     "./preload": "./preload.js",
-    "./config": "./lib/config.js"
+    "./registry-capture": "./registry-capture.js",
+    "./config": "./lib/config.js",
+    "./package.json": "./package.json"
   },
   "pi": {
     "extensions": [
@@ -22,18 +24,24 @@
   "bin": {
     "omp-shims": "./bin/omp-shims.js"
   },
+  "scripts": {
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "biome check .",
+    "test": "bun test",
+    "ci": "biome ci . && bun test"
+  },
   "files": [
     "index.js",
     "preload.js",
     "registry-capture.js",
-    "lib/id-map.js",
-    "lib/inbound.js",
     "lib/",
     "features/",
     "vendor/",
     "systemd/",
     "bin/",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
@@ -41,7 +49,10 @@
   },
   "license": "MIT",
   "private": false,
-  "repository": "https://github.com/PamelaSprin47685ghall/omp-shims",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PamelaSprin47685ghall/omp-shims.git"
+  },
   "homepage": "https://github.com/PamelaSprin47685ghall/omp-shims#readme",
   "bugs": {
     "url": "https://github.com/PamelaSprin47685ghall/omp-shims/issues"
@@ -56,5 +67,8 @@
     "antigravity",
     "kiro",
     "commandcode"
-  ]
+  ],
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15"
+  }
 }

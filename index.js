@@ -9,7 +9,13 @@
 // path that matters for the auth-gateway. This entry exists so a plain omp
 // session is covered too, and so features are discoverable from inside OMP.
 
-import { applyNativeLoopGuard, createContext, FETCH_LAYERS, installFeatures, PROCESS_FEATURES } from "./lib/bootstrap.js";
+import {
+  applyNativeLoopGuard,
+  createContext,
+  FETCH_LAYERS,
+  installFeatures,
+  PROCESS_FEATURES,
+} from "./lib/bootstrap.js";
 import { CONFIG_PATH, describeConfig, FEATURES, loadConfig, readConfigFile, writeConfig } from "./lib/config.js";
 
 /** Interactive sessions get the fetch layers and process features, not the background watchers. */

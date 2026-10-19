@@ -34,8 +34,7 @@ function urlOf(input) {
 }
 
 export function install(config, { addFetchHandler, preserveResponseUrl }) {
-  const ttlMs =
-    Number.parseInt(process.env.OMP_SHIMS_IPV6_TTL_MS ?? String(config.ttlMs ?? 60_000), 10) || 60_000;
+  const ttlMs = Number.parseInt(process.env.OMP_SHIMS_IPV6_TTL_MS ?? String(config.ttlMs ?? 60_000), 10) || 60_000;
   const cache = new Map();
 
   async function resolve(hostname) {
@@ -69,7 +68,7 @@ export function install(config, { addFetchHandler, preserveResponseUrl }) {
   // Resolve the address family here, then hand the request on so the later
   // features still see it. Returning a response from this handler would stop the
   // chain and silently disable the Antigravity repairs.
-  return addFetchHandler(function (input, init, next) {
+  return addFetchHandler((input, init, next) => {
     const url = urlOf(input);
     if (!url.startsWith("http://") && !url.startsWith("https://")) return next(input, init);
 

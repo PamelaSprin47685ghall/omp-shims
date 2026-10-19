@@ -15,10 +15,10 @@
 // documented methods. No minified identifiers are referenced, so this survives
 // OMP upgrades.
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const require_ = createRequire(import.meta.url);
 const PLUGIN_SOURCE = "omp-shims";
@@ -235,7 +235,7 @@ export function install(config, context) {
   const log = context.log ?? (() => {});
   const pluginsDir = config.pluginsDir ?? join(homedir(), ".omp", "plugins");
   // Token specs are provider-agnostic and live outside `features`, so they are
- // merged in from the top-level `pluginBridge` section by the bootstrap.
+  // merged in from the top-level `pluginBridge` section by the bootstrap.
   const resolveToken = makeTokenResolver(context.tokens ?? config.tokens);
   const only = config.plugins ? new Set(config.plugins) : null;
 
@@ -322,107 +322,110 @@ export function install(config, context) {
     if (inFlight.has(registry)) return inFlight.get(registry);
 
     const task = (async () => {
-    const sources = new Set();
-    for (const pkg of packages) {
-      for (const entry of pkg.entries) {
-        let module;
-        try {
-          module = await import(entry);
-        } catch (error) {
-          log(`plugin-bridge: cannot import ${entry}: ${error.message}`);
-          continue;
-        }
-        const init = module.default ?? module;
-        if (typeof init !== "function") continue;
+      const sources = new Set();
+      for (const pkg of packages) {
+        for (const entry of pkg.entries) {
+          let module;
+          try {
+            module = await import(entry);
+          } catch (error) {
+            log(`plugin-bridge: cannot import ${entry}: ${error.message}`);
+            continue;
+          }
+          const init = module.default ?? module;
+          if (typeof init !== "function") continue;
 
-        const before = tokens.size;
-        try {
-          await init(
-            createPluginHost((id, providerConfig) => {
-              if (!providerConfig?.streamSimple && !providerConfig?.models) {
-                log(`plugin-bridge: ignoring ${id} from ${pkg.name} (no models or transport)`);
-                return;
-              }
-              try {
-                // OMP consumes the provider's events directly, so a pi-shaped
-                // transport is adapted before it is handed over.
-                const config = { ...providerConfig };
-                if (typeof config.streamSimple === "function") {
-                  config.streamSimple = wrapTransportEvents(config.streamSimple);
-                  // Let the vendored pi-ai shim dispatch to this provider, for
-                  // the case where a plugin streams through its own
-                  // `streamSimple` import instead of OMP's pipeline.
-                  if (config.api) context.registerTransport?.(config.api, config.streamSimple);
+          const before = tokens.size;
+          try {
+            await init(
+              createPluginHost((id, providerConfig) => {
+                if (!providerConfig?.streamSimple && !providerConfig?.models) {
+                  log(`plugin-bridge: ignoring ${id} from ${pkg.name} (no models or transport)`);
+                  return;
                 }
-                registry.registerProvider(id, config, `${PLUGIN_SOURCE}:${pkg.name}`);
-                if (providerConfig.oauth && typeof providerConfig.oauth === "object") bridgeOauth(id, providerConfig.oauth);
-                sources.add(`${PLUGIN_SOURCE}:${pkg.name}`);
-                tokens.set(id, resolveToken(id));
-                log(`plugin-bridge: registered ${id} (${providerConfig.models?.length ?? 0} models) from ${pkg.name}`);
-              } catch (error) {
-                log(`plugin-bridge: registerProvider(${id}) failed: ${error.message}`);
-              }
-            }),
-          );
-        } catch (error) {
-          log(`plugin-bridge: ${pkg.name} threw during init: ${error.message}`);
-        }
-        if (tokens.size > before) break; // this package already contributed
-      }
-    }
-
-    // Keep our sources alive: the registry clears registrations for any source
-    // missing from the enabled set, which would silently drop the plugins again.
-    const sync = registry.syncExtensionSources?.bind(registry);
-    if (typeof sync === "function" && sources.size > 0) {
-      registry.syncExtensionSources = function (enabled) {
-        const merged = enabled instanceof Set ? new Set(enabled) : new Set(enabled ?? []);
-        for (const source of sources) merged.add(source);
-        return sync(merged);
-      };
-    }
-
-    // Credentials are supplied in memory through the key store, so nothing is
-    // written to the credential database and nothing has to be re-applied by
-    // hand after a restart or an upgrade.
-    //
-    // setConfig rather than setRuntime: a provider config that carries a literal
-    // "$PROVIDER_API_KEY" placeholder is treated as an unresolved config
-    // override, and a runtime key does not displace it. setConfig is the call
-    // that the provider's own placeholder resolves against.
-    const keys = registry.authStorage?.keys;
-    if (keys && typeof keys.setConfig === "function") {
-      for (const [provider, token] of tokens) {
-        if (!token) {
-          log(`plugin-bridge: no credential configured for ${provider}`);
-          continue;
-        }
-        try {
-          keys.setConfig(provider, token);
-          log(`plugin-bridge: credential supplied for ${provider}`);
-        } catch (error) {
-          log(`plugin-bridge: setConfig(${provider}) failed: ${error.message}`);
+                try {
+                  // OMP consumes the provider's events directly, so a pi-shaped
+                  // transport is adapted before it is handed over.
+                  const config = { ...providerConfig };
+                  if (typeof config.streamSimple === "function") {
+                    config.streamSimple = wrapTransportEvents(config.streamSimple);
+                    // Let the vendored pi-ai shim dispatch to this provider, for
+                    // the case where a plugin streams through its own
+                    // `streamSimple` import instead of OMP's pipeline.
+                    if (config.api) context.registerTransport?.(config.api, config.streamSimple);
+                  }
+                  registry.registerProvider(id, config, `${PLUGIN_SOURCE}:${pkg.name}`);
+                  if (providerConfig.oauth && typeof providerConfig.oauth === "object")
+                    bridgeOauth(id, providerConfig.oauth);
+                  sources.add(`${PLUGIN_SOURCE}:${pkg.name}`);
+                  tokens.set(id, resolveToken(id));
+                  log(
+                    `plugin-bridge: registered ${id} (${providerConfig.models?.length ?? 0} models) from ${pkg.name}`,
+                  );
+                } catch (error) {
+                  log(`plugin-bridge: registerProvider(${id}) failed: ${error.message}`);
+                }
+              }),
+            );
+          } catch (error) {
+            log(`plugin-bridge: ${pkg.name} threw during init: ${error.message}`);
+          }
+          if (tokens.size > before) break; // this package already contributed
         }
       }
-    } else {
-      log("plugin-bridge: registry has no authStorage.keys.setConfig; credentials left to OMP");
-    }
 
-    if (process.env.OMP_SHIMS_DEBUG_REGISTRY === "1") {
-      for (const [provider] of tokens) {
-        const state = { provider };
-        try {
-          state.hasProvider = registry.hasProvider?.(provider);
-          state.concreteAuth = registry.hasConcreteAuth?.(provider);
-          state.models = registry.getProviderModels?.(provider)?.length;
-          state.keySource = keys?.source?.(provider);
-          state.available = registry.getAvailableForProviders?.(new Set([provider]), "chat")?.length;
-        } catch (error) {
-          state.error = error.message;
-        }
-        console.error(`[omp-shims] registry-state ${JSON.stringify(state)}`);
+      // Keep our sources alive: the registry clears registrations for any source
+      // missing from the enabled set, which would silently drop the plugins again.
+      const sync = registry.syncExtensionSources?.bind(registry);
+      if (typeof sync === "function" && sources.size > 0) {
+        registry.syncExtensionSources = (enabled) => {
+          const merged = enabled instanceof Set ? new Set(enabled) : new Set(enabled ?? []);
+          for (const source of sources) merged.add(source);
+          return sync(merged);
+        };
       }
-    }
+
+      // Credentials are supplied in memory through the key store, so nothing is
+      // written to the credential database and nothing has to be re-applied by
+      // hand after a restart or an upgrade.
+      //
+      // setConfig rather than setRuntime: a provider config that carries a literal
+      // "$PROVIDER_API_KEY" placeholder is treated as an unresolved config
+      // override, and a runtime key does not displace it. setConfig is the call
+      // that the provider's own placeholder resolves against.
+      const keys = registry.authStorage?.keys;
+      if (keys && typeof keys.setConfig === "function") {
+        for (const [provider, token] of tokens) {
+          if (!token) {
+            log(`plugin-bridge: no credential configured for ${provider}`);
+            continue;
+          }
+          try {
+            keys.setConfig(provider, token);
+            log(`plugin-bridge: credential supplied for ${provider}`);
+          } catch (error) {
+            log(`plugin-bridge: setConfig(${provider}) failed: ${error.message}`);
+          }
+        }
+      } else {
+        log("plugin-bridge: registry has no authStorage.keys.setConfig; credentials left to OMP");
+      }
+
+      if (process.env.OMP_SHIMS_DEBUG_REGISTRY === "1") {
+        for (const [provider] of tokens) {
+          const state = { provider };
+          try {
+            state.hasProvider = registry.hasProvider?.(provider);
+            state.concreteAuth = registry.hasConcreteAuth?.(provider);
+            state.models = registry.getProviderModels?.(provider)?.length;
+            state.keySource = keys?.source?.(provider);
+            state.available = registry.getAvailableForProviders?.(new Set([provider]), "chat")?.length;
+          } catch (error) {
+            state.error = error.message;
+          }
+          console.error(`[omp-shims] registry-state ${JSON.stringify(state)}`);
+        }
+      }
     })().finally(() => {
       inFlight.delete(registry);
     });
@@ -471,5 +474,3 @@ export function install(config, context) {
   hookRegistryClass(host.captured?.get("ModelRegistry"));
   log("plugin-bridge: observing ModelRegistry");
 }
-
-

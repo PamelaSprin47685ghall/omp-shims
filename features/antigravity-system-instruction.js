@@ -7,13 +7,13 @@
 // so the shim is endpoint and version agnostic.
 
 import {
-  addFetchHandler as sharedAddFetchHandler,
   isCloudCodeStream,
   requestUrl,
   rewriteRequestBody,
+  addFetchHandler as sharedAddFetchHandler,
 } from "../lib/fetch-chain.js";
 
-export function install(config, context) {
+export function install(_config, context) {
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
   const extraHosts = context.extraHosts ?? [];
 
@@ -33,7 +33,10 @@ export function install(config, context) {
     // Only Antigravity agent envelopes use requestType "agent".
     if (parsed.requestType !== "agent") return undefined;
 
-    request.contents = [{ role: "user", parts: system.parts }, ...(Array.isArray(request.contents) ? request.contents : [])];
+    request.contents = [
+      { role: "user", parts: system.parts },
+      ...(Array.isArray(request.contents) ? request.contents : []),
+    ];
     delete request.systemInstruction;
     return JSON.stringify(parsed);
   }

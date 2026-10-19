@@ -10,10 +10,10 @@
 //                          (extra-low | minimal | low | medium | high)
 
 import {
-  addFetchHandler as sharedAddFetchHandler,
   isCloudCodeStream,
   requestUrl,
   rewriteRequestBody,
+  addFetchHandler as sharedAddFetchHandler,
 } from "../lib/fetch-chain.js";
 
 const TIERED_PATTERN = /^(gemini-3\.[678]-flash)(?:-(?:minimal|low|medium|high|tiered))?$/;

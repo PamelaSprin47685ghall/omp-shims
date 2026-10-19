@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // omp-shims control CLI.
 //
 //   omp-shims status              show every feature and its current state
@@ -9,11 +10,11 @@
 //
 // Toggles are written to ~/.omp/shims.json (override with OMP_SHIMS_CONFIG).
 
-import { loadConfig, describeConfig, writeConfig, FEATURES, CONFIG_PATH } from "../lib/config.js";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { CONFIG_PATH, describeConfig, FEATURES, loadConfig, writeConfig } from "../lib/config.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const preloadEntry = join(packageRoot, "preload.js");

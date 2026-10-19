@@ -26,16 +26,16 @@
 //   OMP_SHIMS_AG_LOCATION_RETRIES retries when upstream rejects the region
 
 import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
-  addFetchHandler as sharedAddFetchHandler,
   appendJsonLine,
   isCloudCodeStream,
+  preserveResponseUrl,
   requestBody,
   requestUrl,
-  preserveResponseUrl,
+  addFetchHandler as sharedAddFetchHandler,
 } from "../lib/fetch-chain.js";
-import { join } from "node:path";
-import { homedir } from "node:os";
 
 const HASH_SALT = process.env.OMP_SHIMS_AG_HASH_SALT ?? "omp-shims/antigravity-continuation/v1";
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 0;
@@ -204,7 +204,9 @@ function planningLeakRemainder(text, toolNames) {
       "command" in parsed ||
       ("path" in parsed && "content" in parsed);
   } catch {
-    leaked = /"thought"|"_i"|"paths"|"command"/.test(jsonText) || [...toolNames].some((name) => jsonText.includes(`"${name}"`));
+    leaked =
+      /"thought"|"_i"|"paths"|"command"/.test(jsonText) ||
+      [...toolNames].some((name) => jsonText.includes(`"${name}"`));
   }
   if (!leaked) return { leaked: false, visible: text };
   return { leaked: true, visible: object?.rest ?? "" };
@@ -370,7 +372,8 @@ function buildContinuation(bodyString, state, variant) {
 export function install(config, context) {
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
   const extraHosts = context.extraHosts ?? [];
-  const maxContinuations = Number.parseInt(process.env.OMP_SHIMS_AG_CONTINUE_MAX ?? String(config.maxContinuations ?? 3), 10) || 0;
+  const maxContinuations =
+    Number.parseInt(process.env.OMP_SHIMS_AG_CONTINUE_MAX ?? String(config.maxContinuations ?? 3), 10) || 0;
   const maxLocationRetries =
     Number.parseInt(process.env.OMP_SHIMS_AG_LOCATION_RETRIES ?? String(config.locationRetries ?? 3), 10) || 0;
   const parsedIdleTimeout = Number.parseInt(
@@ -379,7 +382,9 @@ export function install(config, context) {
   );
   const idleTimeoutMs = Number.isFinite(parsedIdleTimeout) ? parsedIdleTimeout : DEFAULT_STREAM_IDLE_TIMEOUT_MS;
   const out =
-    config.out ?? process.env.OMP_SHIMS_AG_DIAG_OUT ?? join(homedir(), ".omp", "logs", "antigravity-continuation.jsonl");
+    config.out ??
+    process.env.OMP_SHIMS_AG_DIAG_OUT ??
+    join(homedir(), ".omp", "logs", "antigravity-continuation.jsonl");
   const record = (entry) => appendJsonLine(out, entry);
   const decoder = new TextDecoder();
 
@@ -470,7 +475,10 @@ export function install(config, context) {
             if (part.functionCall && typeof part.functionCall.name === "string" && part.functionCall.name.trim()) {
               state.toolCalls += 1;
             }
-            if (part.thought === true || (part.thoughtSignature && !part.functionCall && (part.text === undefined || part.text === ""))) {
+            if (
+              part.thought === true ||
+              (part.thoughtSignature && !part.functionCall && (part.text === undefined || part.text === ""))
+            ) {
               state.thoughtParts += 1;
               if ((typeof part.text === "string" && part.text !== "") || part.thoughtSignature) {
                 state.thoughtBuffer.push({
@@ -630,7 +638,7 @@ export function install(config, context) {
         throw error;
       })
       .then(async (first) => {
-        let response = first.response;
+        const response = first.response;
         if (!response.body || !response.ok) return response;
 
         const startedAt = performance.now();
@@ -679,7 +687,9 @@ export function install(config, context) {
                 const truncated =
                   state.finishReason === "MAX_TOKENS" &&
                   state.toolCalls === 0 &&
-                  (meaningful.trim().length < 10 || meaningful.trim() === "{" || meaningful.trim().startsWith("```thinking"));
+                  (meaningful.trim().length < 10 ||
+                    meaningful.trim() === "{" ||
+                    meaningful.trim().startsWith("```thinking"));
                 const needsContinuation =
                   attempt < maxContinuations &&
                   (malformed || (!producedOutput && (truncated || state.thoughtParts > 0 || state.visibleChars > 0)));
@@ -727,11 +737,19 @@ export function install(config, context) {
                 const thoughtText = state.thoughtBuffer.map((part) => part.text).join("");
                 if ((thoughtText !== "" || state.visibleText !== "") && !signal?.aborted) {
                   const marker = continuationDigest(thoughtText || state.visibleText, variant);
-                  const asThought = thoughtText !== "" || state.visibleText.includes("<think") || state.visibleText.includes("```thinking");
+                  const asThought =
+                    thoughtText !== "" ||
+                    state.visibleText.includes("<think") ||
+                    state.visibleText.includes("```thinking");
                   const markerBlock = `data: ${JSON.stringify({
                     response: {
                       candidates: [
-                        { content: { role: "model", parts: [asThought ? { text: marker, thought: true } : { text: marker }] } },
+                        {
+                          content: {
+                            role: "model",
+                            parts: [asThought ? { text: marker, thought: true } : { text: marker }],
+                          },
+                        },
                       ],
                     },
                   })}\n\n`;
@@ -747,7 +765,12 @@ export function install(config, context) {
                 if (!current.ok) {
                   const detail = await current.text().catch(() => "");
                   attempts[attempts.length - 1].error = `continuation HTTP ${current.status}`;
-                  record({ ts: new Date().toISOString(), event: "continuation-error", status: current.status, error: detail.slice(0, 500) });
+                  record({
+                    ts: new Date().toISOString(),
+                    event: "continuation-error",
+                    status: current.status,
+                    error: detail.slice(0, 500),
+                  });
                   if (attempt < maxContinuations) continue;
                   finish();
                   break;
@@ -755,13 +778,24 @@ export function install(config, context) {
               }
             } catch (error) {
               const detail = error instanceof Error ? String(error.stack ?? error) : String(error);
-              record({ ts: new Date().toISOString(), event: "continuation-failed", url, error: detail || "(empty error thrown)" });
+              record({
+                ts: new Date().toISOString(),
+                event: "continuation-failed",
+                url,
+                error: detail || "(empty error thrown)",
+              });
               try {
                 controller.error(error instanceof Error ? error : new Error(detail || "continuation stream failed"));
               } catch {}
             } finally {
               if (attempts.length > 0) {
-                record({ ts: new Date().toISOString(), event: "continuation-summary", url, ms: Math.round(performance.now() - startedAt), attempts });
+                record({
+                  ts: new Date().toISOString(),
+                  event: "continuation-summary",
+                  url,
+                  ms: Math.round(performance.now() - startedAt),
+                  attempts,
+                });
               }
               try {
                 controller.close();
