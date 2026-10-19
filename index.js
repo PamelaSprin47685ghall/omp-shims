@@ -45,6 +45,27 @@ export default function ompShims(pi) {
   // do not re-install them to prevent duplicate fetch wrapping and handler inversion.
   if (!installing && globalThis.__OMP_SHIMS__?.started === undefined) {
     void installEnabled();
+    // Plain CLI sessions (no preload) never see the gateway's /v1/models
+    // injection, so expose `github-copilot/auto` through a provider
+    // registration here; the outbound copilot-auto handler negotiates the
+    // session token + real model for it. The auth-gateway advertises the
+    // alias itself and rewrites it inbound, and registering there too would
+    // override its full dynamic catalog — hence the guard.
+    pi.registerProvider?.("github-copilot", {
+      baseUrl: "https://api.githubcopilot.com",
+      api: "openai-completions",
+      oauth: true,
+      models: [
+        {
+          id: "auto",
+          name: "Copilot Auto",
+          reasoning: true,
+          contextWindow: 1050000,
+          maxTokens: 128000,
+          input: ["text", "image"],
+        },
+      ],
+    });
   }
 
   pi.registerCommand?.("omp-shims", {

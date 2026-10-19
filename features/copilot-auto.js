@@ -197,8 +197,26 @@ export function install(config, context) {
       return next(input, init);
     }
 
+    // The gateway strips unknown body fields (like `_requestedModel`) when it
+    // rebuilds the provider request, so the inbound auto-rewrite is invisible
+    // here. Modern Copilot models require a negotiated Copilot-Session-Token and
+    // the session binds to the model /auto selected — upstream answers
+    // 400 model_not_supported without one. On exactly that failure, negotiate a
+    // session, adopt the selected model, and retry once. Legacy models (gpt-4o,
+    // gpt-4.1) succeed on the first pass and never pay the negotiation.
+    let fallbackError = null;
     if (!needsAutoNegotiation) {
-      return next(input, init);
+      const response = await next(input, init);
+      if (response.status !== 400) return response;
+      const errText = await response.clone().text().catch(() => "");
+      if (!errText.includes("model_not_supported")) return response;
+      fallbackError = new Response(errText, {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+      try {
+        await response.body?.cancel();
+      } catch {}
     }
 
     // Perform Auto model negotiation
@@ -227,7 +245,7 @@ export function install(config, context) {
 
       if (!autoRes.ok) {
         context.log?.(`copilot-auto: negotiation failed with HTTP ${autoRes.status}`);
-        return next(input, init);
+        return fallbackError ?? next(input, init);
       }
 
       const autoData = await autoRes.json();
@@ -236,7 +254,7 @@ export function install(config, context) {
       const selectedModelId = selectedModel?.id;
 
       if (!sessionToken || !selectedModelId) {
-        return next(input, init);
+        return fallbackError ?? next(input, init);
       }
 
       context.log?.(`copilot-auto: selected model "${selectedModelId}"`);
@@ -266,6 +284,27 @@ export function install(config, context) {
         if (parsed.messages && !parsed.input) {
           parsed.input = parsed.messages;
           delete parsed.messages;
+        }
+      }
+      // Reverse: caller rode /responses (gateway resolved a responses-only model)
+      // but the negotiated model only serves /chat/completions.
+      if (
+        url.includes("/responses") &&
+        !url.includes("/chat/completions") &&
+        !supportedEndpoints.includes("/responses") &&
+        supportedEndpoints.includes("/chat/completions")
+      ) {
+        targetUrl = url.replace("/responses", "/chat/completions");
+        if (parsed.input && !parsed.messages) {
+          parsed.messages = Array.isArray(parsed.input)
+            ? parsed.input.map((item) => ({
+                role: item?.role ?? "user",
+                content: Array.isArray(item?.content)
+                  ? item.content.map((part) => (part?.type === "input_text" ? { type: "text", text: part.text } : part))
+                  : (item?.content ?? ""),
+              }))
+            : [{ role: "user", content: String(parsed.input) }];
+          delete parsed.input;
         }
       }
 
