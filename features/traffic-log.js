@@ -9,10 +9,10 @@
 //   OMP_SHIMS_TRAFFIC_LOG_MAX_AGE_MS default 3600000 (1h)
 //   OMP_SHIMS_TRAFFIC_LOG_BODY       set to 0 to omit request/response bodies
 
-import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { mkdirSync } from "node:fs";
+import { appendFile, readdir, stat, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 /** Keys whose values are secrets and must never be written to disk. */
 const REDACTED = new Set(["authorization", "x-api-key", "api-key", "cookie", "set-cookie", "proxy-authorization"]);
@@ -30,14 +30,16 @@ function safeBody(body) {
   if (body === undefined || body === null) return undefined;
   const text = typeof body === "string" ? body : undefined;
   if (text === undefined) return `<${body.constructor?.name ?? typeof body}>`;
-  if (text.length > 256_000) return text.slice(0, 256_000) + "…<truncated>";
+  if (text.length > 256_000) return `${text.slice(0, 256_000)}…<truncated>`;
   return text;
 }
 
 export function install(config) {
   const includeBodies = process.env.OMP_SHIMS_TRAFFIC_LOG_BODY !== "0";
   const dir = config.dir ?? process.env.OMP_SHIMS_TRAFFIC_LOG_DIR ?? join(homedir(), ".omp", "gateway-logs");
-  const maxAgeMs = Number.parseInt(process.env.OMP_SHIMS_TRAFFIC_LOG_MAX_AGE_MS ?? String(config.maxAgeMs ?? 3_600_000), 10) || 3_600_000;
+  const maxAgeMs =
+    Number.parseInt(process.env.OMP_SHIMS_TRAFFIC_LOG_MAX_AGE_MS ?? String(config.maxAgeMs ?? 3_600_000), 10) ||
+    3_600_000;
   const sweepMs = Number.parseInt(String(config.sweepMs ?? 300_000), 10) || 300_000;
 
   try {
@@ -52,7 +54,9 @@ export function install(config) {
   function write(entry) {
     // Serialize appends so concurrent requests cannot interleave partial lines.
     queue = queue
-      .then(() => appendFile(fileFor(new Date()), JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n", "utf8"))
+      .then(() =>
+        appendFile(fileFor(new Date()), `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`, "utf8"),
+      )
       .catch(() => {});
   }
 
@@ -105,7 +109,13 @@ export function install(config) {
           });
           return response;
         } catch (error) {
-          write({ event: "error", method: request.method, url: request.url, ms: Date.now() - startedAt, error: String(error?.stack ?? error) });
+          write({
+            event: "error",
+            method: request.method,
+            url: request.url,
+            ms: Date.now() - startedAt,
+            error: String(error?.stack ?? error),
+          });
           throw error;
         }
       };

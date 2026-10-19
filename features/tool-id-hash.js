@@ -31,8 +31,8 @@
 
 import { createHash } from "node:crypto";
 import { addFetchHandler as sharedAddFetchHandler } from "../lib/fetch-chain.js";
+import { originalFor, remember } from "../lib/id-map.js";
 import { patchServe } from "../lib/inbound.js";
-import { remember, originalFor } from "../lib/id-map.js";
 
 const SALT = process.env.OMP_SHIMS_TOOL_ID_SALT ?? "";
 const HASH_LENGTH = 8;
@@ -150,7 +150,7 @@ function restoreStream(text) {
   return changed ? lines.join("\n") : undefined;
 }
 
-export function install(config, context) {
+export function install(_config, context) {
   const log = context.log ?? (() => {});
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
 
@@ -160,7 +160,7 @@ export function install(config, context) {
   // Outbound: put them back as the response streams past, innermost so it sees
   // the ids exactly as the provider produced them.
   addFetchHandler((input, init, next) => {
-    const url = typeof input === "string" ? input : input?.url ?? "";
+    const url = typeof input === "string" ? input : (input?.url ?? "");
     if (!url) return next(input, init);
     return next(input, init).then((response) => {
       if (!response?.body || !response.ok) return response;

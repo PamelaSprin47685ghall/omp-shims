@@ -20,9 +20,9 @@
 //   OMP_SHIMS_KIRO_SYNC_POLL   poll interval in ms (default 60000)
 
 import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 const require_ = createRequire(import.meta.url);
 
@@ -49,7 +49,9 @@ export function install(config, context) {
     process.env.OMP_SHIMS_KIRO_SYNC_DB ??
     config.dbPath ??
     join(homedir(), ".local", "share", "kiro-cli", "data.sqlite3");
-  const pollMs = Number.parseInt(process.env.OMP_SHIMS_KIRO_SYNC_POLL ?? String(config.pollMs ?? DEFAULT_POLL_MS), 10) || DEFAULT_POLL_MS;
+  const pollMs =
+    Number.parseInt(process.env.OMP_SHIMS_KIRO_SYNC_POLL ?? String(config.pollMs ?? DEFAULT_POLL_MS), 10) ||
+    DEFAULT_POLL_MS;
 
   if (!existsSync(dbPath)) {
     log(`kiro-credential-sync: kiro-cli database not found at ${dbPath}; skipping`);
@@ -108,10 +110,9 @@ export function install(config, context) {
       };
 
       const update = db.transaction(() => {
-        db.query("UPDATE auth_credentials SET data = ?, updated_at = CAST(strftime('%s','now') AS INTEGER) WHERE id = ?").run(
-          JSON.stringify(next),
-          row.id,
-        );
+        db.query(
+          "UPDATE auth_credentials SET data = ?, updated_at = CAST(strftime('%s','now') AS INTEGER) WHERE id = ?",
+        ).run(JSON.stringify(next), row.id);
         db.query("UPDATE auth_change_revision SET revision = revision + 1 WHERE id = 1").run();
       });
       update();

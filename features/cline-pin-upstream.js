@@ -16,11 +16,7 @@
 //   OMP_SHIMS_CLINE_API_KEY       ClinePass API key, used only when the request
 //                                 carries no Authorization header (no default)
 
-import {
-  addFetchHandler as sharedAddFetchHandler,
-  requestUrl,
-  requestBody,
-} from "../lib/fetch-chain.js";
+import { requestBody, requestUrl, addFetchHandler as sharedAddFetchHandler } from "../lib/fetch-chain.js";
 
 const DEFAULT_MODEL_CHANNELS = {
   "deepseek-v4.1-flash": ["deepseek"],

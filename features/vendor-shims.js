@@ -15,10 +15,10 @@
 // Env:
 //   OMP_SHIMS_VENDOR_SKIP=1   skip installation
 
-import { existsSync, mkdirSync, cpSync, rmSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const vendorRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "vendor");
 

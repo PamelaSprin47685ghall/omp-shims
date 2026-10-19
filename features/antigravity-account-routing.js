@@ -17,17 +17,17 @@
 //     "cooldownMs": 60000
 //   }
 
-import {
-  addFetchHandler as sharedAddFetchHandler,
-  appendJsonLine,
-  isCloudCodeStream,
-  requestUrl,
-  requestBody,
-} from "../lib/fetch-chain.js";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import {
+  appendJsonLine,
+  isCloudCodeStream,
+  requestBody,
+  requestUrl,
+  addFetchHandler as sharedAddFetchHandler,
+} from "../lib/fetch-chain.js";
 
 const require_ = createRequire(import.meta.url);
 
@@ -79,9 +79,11 @@ function loadAccounts(dbPath, ultraList, proList) {
   const { Database } = require_("bun:sqlite");
   const db = new Database(dbPath, { readonly: true });
   try {
-    const rows = db.query(
-      "SELECT id, data FROM auth_credentials WHERE provider = 'google-antigravity' AND disabled_cause IS NULL ORDER BY id"
-    ).all();
+    const rows = db
+      .query(
+        "SELECT id, data FROM auth_credentials WHERE provider = 'google-antigravity' AND disabled_cause IS NULL ORDER BY id",
+      )
+      .all();
     const loaded = [];
     for (const row of rows) {
       try {
@@ -143,7 +145,10 @@ export function install(config, context) {
   const cooldownMs = Number.parseInt(String(config.cooldownMs ?? DEFAULT_COOLDOWN_MS), 10) || DEFAULT_COOLDOWN_MS;
   const ultraPattern = config.ultraModelPattern ? new RegExp(config.ultraModelPattern, "i") : DEFAULT_ULTRA_PATTERN;
   const agentDbPath = join(homedir(), ".omp", "agent", "agent.db");
-  const out = config.out ?? process.env.OMP_SHIMS_AG_ACCOUNTS_OUT ?? join(homedir(), ".omp", "logs", "antigravity-accounts.jsonl");
+  const out =
+    config.out ??
+    process.env.OMP_SHIMS_AG_ACCOUNTS_OUT ??
+    join(homedir(), ".omp", "logs", "antigravity-accounts.jsonl");
   const record = (entry) => appendJsonLine(out, entry);
 
   log("antigravity-account-routing: enabled (sequential drain)", { ultraEmails, proEmails, cooldownMs });
@@ -158,7 +163,9 @@ export function install(config, context) {
       // credential resolution so the request still completes on the normal
       // path instead of surfacing an unhandled rejection to the client.
       if (init?.signal?.aborted || input?.signal?.aborted) throw error;
-      log(`antigravity-account-routing: candidate attempt threw; falling back to gateway credential: ${error?.message ?? error}`);
+      log(
+        `antigravity-account-routing: candidate attempt threw; falling back to gateway credential: ${error?.message ?? error}`,
+      );
       return next(input, init);
     }
   });
@@ -208,8 +215,14 @@ export function install(config, context) {
     const isUltraRequired = ultraPattern.test(model);
     const now = Date.now();
 
-    const ultras = sortByConfiguredOrder(cachedAccounts.filter((a) => a.isUltra), ultraEmails);
-    const pros = sortByConfiguredOrder(cachedAccounts.filter((a) => a.isPro), proEmails);
+    const ultras = sortByConfiguredOrder(
+      cachedAccounts.filter((a) => a.isUltra),
+      ultraEmails,
+    );
+    const pros = sortByConfiguredOrder(
+      cachedAccounts.filter((a) => a.isPro),
+      proEmails,
+    );
 
     if (isUltraRequired) {
       // Ultra models (Gemini 4, Opus, Sonnet):
@@ -226,7 +239,9 @@ export function install(config, context) {
         const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
         headers.set("Authorization", `Bearer ${candidate.token}`);
 
-        log(`antigravity-account-routing: model "${model}" attempt ${i + 1}/${candidates.length} -> ultra (${candidate.email})`);
+        log(
+          `antigravity-account-routing: model "${model}" attempt ${i + 1}/${candidates.length} -> ultra (${candidate.email})`,
+        );
         const response = await next(input, { ...init, headers });
 
         record({
@@ -251,7 +266,7 @@ export function install(config, context) {
         } catch {}
         candidate.cooldownUntil = Date.now() + cooldownDuration;
         log(
-          `antigravity-account-routing: ultra account ${candidate.email} returned 429; cooling down for ${Math.round(cooldownDuration / 1000)}s`
+          `antigravity-account-routing: ultra account ${candidate.email} returned 429; cooling down for ${Math.round(cooldownDuration / 1000)}s`,
         );
 
         try {
@@ -284,7 +299,7 @@ export function install(config, context) {
       headers.set("Authorization", `Bearer ${candidate.token}`);
 
       log(
-        `antigravity-account-routing: model "${model}" attempt ${i + 1}/${candidates.length} -> ${candidate.isUltra ? "ultra" : "pro"} (${candidate.email})`
+        `antigravity-account-routing: model "${model}" attempt ${i + 1}/${candidates.length} -> ${candidate.isUltra ? "ultra" : "pro"} (${candidate.email})`,
       );
 
       const response = await next(input, { ...init, headers });
@@ -313,7 +328,7 @@ export function install(config, context) {
       } catch {}
       candidate.cooldownUntil = Date.now() + cooldownDuration;
       log(
-        `antigravity-account-routing: account ${candidate.email} returned 429; cooling down for ${Math.round(cooldownDuration / 1000)}s`
+        `antigravity-account-routing: account ${candidate.email} returned 429; cooling down for ${Math.round(cooldownDuration / 1000)}s`,
       );
 
       try {

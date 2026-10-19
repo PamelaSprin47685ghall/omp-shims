@@ -63,8 +63,8 @@ Object.defineProperty = function (target, property, descriptor) {
   ) {
     const getter = descriptor.get;
     announce(property, () => getter.call(this));
-    descriptor.get = function () {
-      const value = getter.apply(this, arguments);
+    descriptor.get = function (...args) {
+      const value = getter.apply(this, args);
       if (!captured.has(property) && value !== undefined && value !== null) {
         captured.set(property, value);
         for (const entry of observers) {
@@ -77,5 +77,5 @@ Object.defineProperty = function (target, property, descriptor) {
       return value;
     };
   }
-  return originalDefineProperty.apply(this, arguments);
+  return originalDefineProperty.call(this, target, property, descriptor);
 };

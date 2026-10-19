@@ -7,10 +7,10 @@
 
 export * from "./index.js";
 
-let hostRegistry = null;
+let _hostRegistry = null;
 
 export function setHostRegistry(registry) {
-  hostRegistry = registry ?? null;
+  _hostRegistry = registry ?? null;
 }
 
 /**
