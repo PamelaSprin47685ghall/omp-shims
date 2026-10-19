@@ -9,64 +9,29 @@
 // path that matters for the auth-gateway. This entry exists so a plain omp
 // session is covered too, and so features are discoverable from inside OMP.
 
-import { loadConfig, describeConfig, writeConfig, FEATURES, CONFIG_PATH, readConfigFile } from "./lib/config.js";
-import { addFetchHandler, preserveResponseUrl } from "./lib/fetch-chain.js";
+import { applyNativeLoopGuard, createContext, FETCH_LAYERS, installFeatures, PROCESS_FEATURES } from "./lib/bootstrap.js";
+import { CONFIG_PATH, describeConfig, FEATURES, loadConfig, readConfigFile, writeConfig } from "./lib/config.js";
 
-const LOAD_ORDER = [
-  "tool-id-hash",
-  "antigravity-capture",
-  "antigravity-account-routing",
-  "antigravity-continuation",
-  "antigravity-system-instruction",
-  "cline-pin-upstream",
-  "antigravity-routing",
-  "ipv6-first",
-  "vendor-shims",
-  "plugin-bridge",
-  "traffic-log",
-];
+/** Interactive sessions get the fetch layers and process features, not the background watchers. */
+const LOAD_ORDER = [...FETCH_LAYERS, ...PROCESS_FEATURES];
 
-const installed = new Set();
 let installing = false;
-
-// Token specs live outside `features`, so read them once here.
-const { pluginBridge } = readConfigFile();
-
-function context() {
-  return {
-    log: (message, detail) => {
-      if (process.env.OMP_SHIMS_VERBOSE === "1") console.error(`[omp-shims] ${message}`, detail ?? "");
-    },
-    addFetchHandler,
-    preserveResponseUrl,
-    extraHosts: [],
-    tokens: pluginBridge?.tokens,
-  };
-}
 
 async function installEnabled() {
   if (installing || globalThis.__OMP_SHIMS__?.started !== undefined) return;
   installing = true;
   const { features } = loadConfig();
+  // Token specs live outside `features`, in the top-level `pluginBridge` section.
+  const { pluginBridge } = readConfigFile();
+  const started = [];
   globalThis.__OMP_SHIMS__ = {
     features,
-    started: [],
+    started,
     names: Object.keys(FEATURES),
   };
 
-  if (!features["native-loop-guard"].enabled) process.env.PI_NO_THINKING_LOOP_GUARD = "1";
-
-  for (const name of LOAD_ORDER) {
-    if (installed.has(name) || !features[name]?.enabled) continue;
-    try {
-      const module = await import(`./features/${name}.js`);
-      module.install(features[name], context());
-      installed.add(name);
-      globalThis.__OMP_SHIMS__.started.push(name);
-    } catch (error) {
-      console.error(`[omp-shims] feature "${name}" failed to install: ${error.message}`);
-    }
-  }
+  applyNativeLoopGuard(features);
+  await installFeatures(LOAD_ORDER, features, createContext({ tokens: pluginBridge?.tokens }), started);
 }
 
 export default function ompShims(pi) {

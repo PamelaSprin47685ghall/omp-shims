@@ -30,7 +30,7 @@
 //   OMP_SHIMS_TOOL_ID_SALT  mixed into the digest; change it to re-key ids
 
 import { createHash } from "node:crypto";
-import { addFetchHandler } from "../lib/fetch-chain.js";
+import { addFetchHandler as sharedAddFetchHandler } from "../lib/fetch-chain.js";
 import { patchServe } from "../lib/inbound.js";
 import { remember, originalFor } from "../lib/id-map.js";
 
@@ -152,6 +152,7 @@ function restoreStream(text) {
 
 export function install(config, context) {
   const log = context.log ?? (() => {});
+  const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
 
   // Inbound: hash the ids the client sent.
   patchServe((body) => transformJson(body, hashifyId));

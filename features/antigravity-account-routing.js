@@ -27,6 +27,9 @@ import {
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+
+const require_ = createRequire(import.meta.url);
 
 const DEFAULT_COOLDOWN_MS = 60_000;
 const DEFAULT_ULTRA_PATTERN = /gemini-4|opus|sonnet/i;
@@ -73,7 +76,7 @@ function sortByConfiguredOrder(accounts, emailOrder) {
 }
 
 function loadAccounts(dbPath, ultraList, proList) {
-  const { Database } = require("bun:sqlite");
+  const { Database } = require_("bun:sqlite");
   const db = new Database(dbPath, { readonly: true });
   try {
     const rows = db.query(

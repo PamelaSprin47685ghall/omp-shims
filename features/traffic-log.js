@@ -12,9 +12,7 @@
 import { appendFile, mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { createRequire } from "node:module";
-
-const require_ = createRequire(import.meta.url);
+import { mkdirSync } from "node:fs";
 
 /** Keys whose values are secrets and must never be written to disk. */
 const REDACTED = new Set(["authorization", "x-api-key", "api-key", "cookie", "set-cookie", "proxy-authorization"]);
@@ -43,7 +41,7 @@ export function install(config) {
   const sweepMs = Number.parseInt(String(config.sweepMs ?? 300_000), 10) || 300_000;
 
   try {
-    require_("node:fs").mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true });
   } catch {}
 
   function fileFor(date) {
