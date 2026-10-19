@@ -10,8 +10,10 @@ describe("copilot-auto", () => {
 
     expect(isAutoModel("auto")).toBe(true);
     expect(isAutoModel("copilot-auto")).toBe(true);
+    expect(isAutoModel("copilot/auto")).toBe(true);
     expect(isAutoModel("github-copilot/auto")).toBe(true);
     expect(isAutoModel("auto/gpt-5")).toBe(true);
+    expect(isAutoModel("copilot/auto/test")).toBe(true);
     expect(isAutoModel("gpt-4o")).toBe(false);
   });
 
