@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { install, restoreToolIds, rewriteToolIds } from "../features/tool-id-hash.js";
 import { originalFor } from "../lib/id-map.js";
 import { fakeContext, parseSse, sseResponse } from "./helpers.js";
@@ -64,7 +64,7 @@ describe("restoreToolIds", () => {
 describe("install", () => {
   // install() patches Bun.serve, so it is installed exactly once, as in production.
   const { context, handlers } = fakeContext();
-  beforeAll(() => install({}, context));
+  install({}, context);
 
   test("restores ids in JSON responses", async () => {
     const hashed = rewriteToolIds({ tool_call_id: "call_42" }).tool_call_id;
