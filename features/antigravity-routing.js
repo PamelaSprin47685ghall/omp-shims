@@ -48,7 +48,8 @@ export function install(config, context) {
   if (config?.enabled === false) return;
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
   const extraHosts = context.extraHosts ?? [];
-  const defaultLevel = EFFORT_LEVELS[String(config.effort ?? "high").toLowerCase()] ?? "HIGH";
+  const effort = process.env.OMP_SHIMS_AG_EFFORT || config.effort || "high";
+  const defaultLevel = EFFORT_LEVELS[String(effort).toLowerCase()] ?? "HIGH";
 
   function route(bodyString) {
     let parsed;

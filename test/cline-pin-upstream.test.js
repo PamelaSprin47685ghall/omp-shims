@@ -14,7 +14,7 @@ async function send(config, body, init = {}) {
 }
 
 afterEach(() => {
-  delete process.env.OMP_SHIMS_CLINE_API_KEY;
+  for (const key of ["API_KEY", "PIN_HOST", "PIN_UPSTREAM", "PIN_MODELS"]) delete process.env[`OMP_SHIMS_CLINE_${key}`];
 });
 
 describe("cline-pin-upstream", () => {
@@ -44,6 +44,13 @@ describe("cline-pin-upstream", () => {
     expect((await send({}, { model: "x" })).headers.get("authorization")).toBe("Bearer from-env");
     const existing = await send({}, { model: "x" }, { headers: { Authorization: "Bearer mine" } });
     expect(existing.headers.get("authorization")).toBe("Bearer mine");
+  });
+
+  test("environment variables override the configured upstream and model filter", async () => {
+    process.env.OMP_SHIMS_CLINE_PIN_UPSTREAM = "env-channel";
+    expect((await send({}, { model: "other" })).body.providerOptions.gateway.only).toEqual(["env-channel"]);
+    process.env.OMP_SHIMS_CLINE_PIN_MODELS = "only-this";
+    expect((await send({}, { model: "other" })).body.providerOptions).toBeUndefined();
   });
 
   test("ignores other hosts and paths", async () => {
