@@ -14,7 +14,7 @@ Environment="NODE_OPTIONS=--no-network-family-autoselection"
 
 # Load every enabled shim from the omp-shims plugin. Feature selection lives in
 # ~/.omp/shims.json, so this line never changes between deployments.
-# @SHIMS_PRELOAD@
+@SHIMS_PRELOAD@
 
 # Optional per-feature overrides (uncomment what you need):
 # Environment="OMP_SHIMS_AG_HASH_SALT=change-me"

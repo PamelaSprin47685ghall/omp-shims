@@ -12,7 +12,7 @@ Environment="NODE_OPTIONS=--no-network-family-autoselection"
 
 # Same preload as the gateway so both processes resolve credentials and network
 # behaviour identically.
-# @SHIMS_PRELOAD@
+@SHIMS_PRELOAD@
 
 ExecStart=@OMP_BIN@ auth-broker serve --bind=127.0.0.1:8765
 Restart=always
