@@ -1,0 +1,39 @@
+name: Bug report
+description: Something in omp-shims does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please never paste API keys, tokens or account e-mail addresses. Redact them.
+  - type: input
+    id: feature
+    attributes:
+      label: Feature
+      description: Which feature is involved (see `omp-shims status`)?
+      placeholder: antigravity-continuation
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Output with `OMP_SHIMS_VERBOSE=1`, redacted.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: omp-shims commit, `omp --version`, `bun --version`, OS.
+    validations:
+      required: true

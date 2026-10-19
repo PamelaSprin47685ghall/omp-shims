@@ -1,3 +1,21 @@
+# Dependencies
 node_modules/
+
+# Logs and diagnostics
 *.log
+*.jsonl
+gateway-logs/
+
+# Local configuration (may hold credentials)
+shims.json
+.env
+.env.*
+
+# Packaging
+*.tgz
+
+# Editors and OS
 .DS_Store
+.idea/
+.vscode/
+*.swp
