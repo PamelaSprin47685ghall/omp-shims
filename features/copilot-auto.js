@@ -28,8 +28,8 @@ const AUTO_MODEL_ENTRIES = [
     api: "openai-completions",
     display_name: "Copilot Auto",
     input_modalities: ["text", "image"],
-    context_length: 1000000,
-    max_output_tokens: 65536,
+    context_length: 264000,
+    max_output_tokens: 64000,
   },
   {
     id: "github-copilot/auto",
@@ -38,8 +38,8 @@ const AUTO_MODEL_ENTRIES = [
     api: "openai-completions",
     display_name: "GitHub Copilot Auto",
     input_modalities: ["text", "image"],
-    context_length: 1000000,
-    max_output_tokens: 65536,
+    context_length: 264000,
+    max_output_tokens: 64000,
   },
   {
     id: "copilot-auto",
@@ -48,8 +48,8 @@ const AUTO_MODEL_ENTRIES = [
     api: "openai-completions",
     display_name: "Copilot Auto",
     input_modalities: ["text", "image"],
-    context_length: 1000000,
-    max_output_tokens: 65536,
+    context_length: 264000,
+    max_output_tokens: 64000,
   },
 ];
 
@@ -162,7 +162,7 @@ function installInboundHook() {
                   // Rewrite to an existing copilot model so gateway validation passes
                   // The downstream outbound fetch handler in copilot-auto will negotiate the real model!
                   parsed._requestedModel = parsed.model;
-                  parsed.model = "github-copilot/gpt-4o";
+                  parsed.model = "github-copilot/claude-sonnet-5";
                   const rewrittenRequest = new Request(request.url, {
                     method: request.method,
                     headers: request.headers,

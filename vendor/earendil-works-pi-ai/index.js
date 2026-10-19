@@ -106,6 +106,15 @@ export function calculateCost() {
   return 0;
 }
 
+export function clampThinkingLevel(model, level) {
+  if (!level || level === "off") return "off";
+  const map = model?.thinkingLevelMap;
+  if (map && map[level] !== undefined && map[level] !== null) return level;
+  const efforts = model?.thinking?.efforts;
+  if (Array.isArray(efforts) && efforts.includes(level)) return level;
+  return model?.thinking?.defaultLevel ?? "medium";
+}
+
 export function streamSimple(model, context, options) {
   const transport = model?.api ? transports.get(model.api) : undefined;
   if (transport) return transport(model, context, options);
