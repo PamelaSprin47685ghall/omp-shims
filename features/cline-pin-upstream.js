@@ -9,7 +9,7 @@
 //   deepseek-v4.1-flash -> deepseek
 //   others -> openai-compatible-private (or fallback)
 //
-// Env:
+// Env (each overrides the matching setting in ~/.omp/shims.json):
 //   OMP_SHIMS_CLINE_PIN_HOST      default api.cline.bot
 //   OMP_SHIMS_CLINE_PIN_UPSTREAM  default openai-compatible-private
 //   OMP_SHIMS_CLINE_PIN_MODELS    optional comma list; empty = all models
@@ -25,14 +25,14 @@ const DEFAULT_MODEL_CHANNELS = {
 
 export function install(config, context) {
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
-  const target = config.host ?? process.env.OMP_SHIMS_CLINE_PIN_HOST ?? "api.cline.bot";
-  const defaultUpstream = config.upstream ?? process.env.OMP_SHIMS_CLINE_PIN_UPSTREAM ?? "openai-compatible-private";
-  const apiKey = config.apiKey ?? process.env.OMP_SHIMS_CLINE_API_KEY;
+  const target = process.env.OMP_SHIMS_CLINE_PIN_HOST || config.host || "api.cline.bot";
+  const defaultUpstream = process.env.OMP_SHIMS_CLINE_PIN_UPSTREAM || config.upstream || "openai-compatible-private";
+  const apiKey = process.env.OMP_SHIMS_CLINE_API_KEY || config.apiKey;
   const modelChannels = {
     ...DEFAULT_MODEL_CHANNELS,
     ...(config.modelChannels ?? {}),
   };
-  const modelFilter = (config.models ?? process.env.OMP_SHIMS_CLINE_PIN_MODELS ?? "")
+  const modelFilter = (process.env.OMP_SHIMS_CLINE_PIN_MODELS || config.models || "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);

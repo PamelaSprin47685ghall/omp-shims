@@ -64,6 +64,20 @@ describe("antigravity-routing", () => {
     expect(body.request.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "MEDIUM" });
   });
 
+  test("OMP_SHIMS_AG_EFFORT sets the default thinking level", async () => {
+    process.env.OMP_SHIMS_AG_EFFORT = "low";
+    try {
+      const body = await sentBody(
+        installRouting,
+        { effort: "high" },
+        { requestType: "agent", model: "gemini-3.8-flash" },
+      );
+      expect(body.request.generationConfig.thinkingConfig.thinkingLevel).toBe("LOW");
+    } finally {
+      delete process.env.OMP_SHIMS_AG_EFFORT;
+    }
+  });
+
   test("leaves tiny output budgets alone", async () => {
     const original = {
       requestType: "agent",
