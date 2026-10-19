@@ -47,24 +47,6 @@ export default function ompShims(pi) {
     void installEnabled();
   }
 
-  // Register copilot/auto provider so `copilot/auto` is available in `omp models` and CLI
-  pi.registerProvider?.("copilot", {
-    name: "GitHub Copilot (Auto)",
-    baseUrl: "https://api.individual.githubcopilot.com",
-    apiKey: "placeholder",
-    api: "openai-completions",
-    models: [
-      {
-        id: "auto",
-        name: "Copilot Auto",
-        reasoning: true,
-        contextWindow: 1000000,
-        maxTokens: 65536,
-        input: ["text", "image"],
-      },
-    ],
-  });
-
   pi.registerCommand?.("omp-shims", {
     description: "Show or toggle omp-shims features",
     handler: async (args, ctx) => {

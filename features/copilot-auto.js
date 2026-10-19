@@ -22,34 +22,14 @@ const DEFAULT_API_VERSION = "2026-08-01";
 
 const AUTO_MODEL_ENTRIES = [
   {
-    id: "copilot/auto",
-    object: "model",
-    owned_by: "github-copilot",
-    api: "openai-completions",
-    display_name: "Copilot Auto",
-    input_modalities: ["text", "image"],
-    context_length: 264000,
-    max_output_tokens: 64000,
-  },
-  {
     id: "github-copilot/auto",
     object: "model",
     owned_by: "github-copilot",
     api: "openai-completions",
-    display_name: "GitHub Copilot Auto",
-    input_modalities: ["text", "image"],
-    context_length: 264000,
-    max_output_tokens: 64000,
-  },
-  {
-    id: "copilot-auto",
-    object: "model",
-    owned_by: "github-copilot",
-    api: "openai-completions",
     display_name: "Copilot Auto",
     input_modalities: ["text", "image"],
-    context_length: 264000,
-    max_output_tokens: 64000,
+    context_length: 1050000,
+    max_output_tokens: 128000,
   },
 ];
 
@@ -159,10 +139,10 @@ function installInboundHook() {
               try {
                 const parsed = JSON.parse(bodyText);
                 if (parsed && typeof parsed.model === "string" && isAutoModel(parsed.model)) {
-                  // Rewrite to an existing copilot model so gateway validation passes
+                  // Rewrite to gpt-5.6-luna-1m so gateway validation passes with 1M context
                   // The downstream outbound fetch handler in copilot-auto will negotiate the real model!
                   parsed._requestedModel = parsed.model;
-                  parsed.model = "github-copilot/claude-sonnet-5";
+                  parsed.model = "github-copilot/gpt-5.6-luna-1m";
                   const rewrittenRequest = new Request(request.url, {
                     method: request.method,
                     headers: request.headers,

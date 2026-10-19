@@ -459,6 +459,34 @@ export function install(config, context) {
         return Promise.resolve(original.apply(this, args)).then(() => registerInto(this));
       };
     }
+
+    for (const method of ["getAvailable", "getAvailableForProviders"]) {
+      const origMethod = proto[method];
+      if (typeof origMethod !== "function") continue;
+      proto[method] = function (...args) {
+        const res = origMethod.apply(this, args);
+        if (!Array.isArray(res)) return res;
+        const hasCopilot = res.some((m) => m.provider === "github-copilot");
+        const hasAuto = res.some((m) => m.provider === "github-copilot" && m.id === "auto");
+        if (hasCopilot && !hasAuto) {
+          return [
+            {
+              id: "auto",
+              name: "Copilot Auto",
+              provider: "github-copilot",
+              api: "openai-completions",
+              reasoning: true,
+              contextWindow: 1050000,
+              maxTokens: 128000,
+              input: ["text", "image"],
+            },
+            ...res,
+          ];
+        }
+        return res;
+      };
+    }
+
     log("plugin-bridge: hooked ModelRegistry refresh/getAll");
   }
 
