@@ -40,7 +40,7 @@ export function install(config) {
   const includeBodies = process.env.OMP_SHIMS_TRAFFIC_LOG_BODY !== "0";
   const dir = config.dir ?? process.env.OMP_SHIMS_TRAFFIC_LOG_DIR ?? join(homedir(), ".omp", "gateway-logs");
   const maxAgeMs = Number.parseInt(process.env.OMP_SHIMS_TRAFFIC_LOG_MAX_AGE_MS ?? String(config.maxAgeMs ?? 3_600_000), 10) || 3_600_000;
-  const sweepMs = Number.parseInt(config.sweepMs ?? 300_000);
+  const sweepMs = Number.parseInt(String(config.sweepMs ?? 300_000), 10) || 300_000;
 
   try {
     require_("node:fs").mkdirSync(dir, { recursive: true });
@@ -73,7 +73,7 @@ export function install(config) {
   const timer = setInterval(sweep, sweepMs);
   timer.unref?.();
 
-  const originalServe = Bun?.serve;
+  const originalServe = globalThis.Bun?.serve;
   if (typeof originalServe !== "function") return;
 
   Bun.serve = function patchedServe(options) {

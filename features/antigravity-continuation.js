@@ -234,7 +234,7 @@ function toolNamesOf(bodyString) {
 function sanitizeTerminalBlock(block) {
   return block
     .replace(/"finishReason"\s*:\s*"MALFORMED_FUNCTION_CALL"/g, '"finishReason":"STOP"')
-    .replace(/"finishMessage"\s*:\s*"[^"]*"/g, '""');
+    .replace(/"finishMessage"\s*:\s*"(?:[^"\\]|\\.)*"/g, '"finishMessage":""');
 }
 
 function modelOf(bodyString) {
