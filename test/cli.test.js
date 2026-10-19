@@ -61,7 +61,15 @@ describe("omp-shims CLI", () => {
     expect(stdout).not.toContain("@SHIMS_PRELOAD@");
     expect(stdout).toContain(`ExecStart=${home}/.local/bin/omp auth-gateway serve`);
     expect(stdout).toContain("User=tester");
+    // The preload line must be live, not commented out, or the unit runs without the shims.
+    expect(stdout).toMatch(/^Environment="BUN_OPTIONS=--preload \S+registry-capture\.js --preload \S+preload\.js"$/m);
     expect(stdout).toContain(`WorkingDirectory=${home}`);
+  });
+
+  test("both units load the shims", () => {
+    for (const unit of ["omp-auth-broker", "omp-auth-gateway"]) {
+      expect(run(["systemd", unit]).stdout).toMatch(/^Environment="BUN_OPTIONS=--preload /m);
+    }
   });
 
   test("systemd rejects unknown units", () => {
