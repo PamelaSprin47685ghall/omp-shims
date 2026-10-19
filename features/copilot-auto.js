@@ -176,7 +176,19 @@ export function install(config, context) {
     // Skip the negotiation endpoint itself to avoid infinite loops
     if (url.includes("/auto?")) return next(input, init);
 
-    const bodyStr = requestBody(input, init);
+    // `requestBody` only sees string bodies. The /v1/responses route builds its
+    // upstream call as a Request with a streamed body, which left this layer
+    // blind and bypassed negotiation entirely (upstream then answered
+    // 400 model_not_supported because no Copilot-Session-Token was attached).
+    // Clone the Request to read the JSON without consuming the live body.
+    let bodyStr = requestBody(input, init);
+    if (bodyStr === undefined && input instanceof Request) {
+      try {
+        bodyStr = await input.clone().text();
+      } catch {
+        bodyStr = undefined;
+      }
+    }
     if (!bodyStr) return next(input, init);
 
     let parsed;

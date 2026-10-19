@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import { extractPrompt, install, isAutoModel, isCopilotEndpoint } from "../features/copilot-auto.js";
 import { fakeContext } from "./helpers.js";
 
@@ -108,6 +108,63 @@ describe("copilot-auto", () => {
       const body = JSON.parse(rewrittenInit.body);
       expect(body.model).toBe("gpt-5.6-luna");
       expect(body.input).toBeDefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("copilot-auto Request-body negotiation (/v1/responses route)", () => {
+  test("reads a Request streamed body, negotiates on 400, retries with session token", async () => {
+    const { context, handlers } = fakeContext();
+    install({ enabled: true }, context);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      if (String(url).includes("/auto?")) {
+        return new Response(
+          JSON.stringify({
+            session_token: "jwt-abc",
+            selected_model: { id: "gpt-5.6-luna", supported_endpoints: ["/responses", "ws:/responses"] },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response("unexpected", { status: 599 });
+    };
+
+    try {
+      const handler = handlers[0];
+      const request = new Request("https://api.individual.githubcopilot.com/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer gho_test" },
+        body: JSON.stringify({ model: "gpt-5.6-luna", input: [{ role: "user", content: "ls" }], stream: true }),
+      });
+
+      const calls = [];
+      const response = await handler(
+        request,
+        undefined,
+        async (input, init) => {
+          calls.push({ input, init });
+          if (calls.length === 1) {
+            // Request is replayable: the layer must not have consumed it.
+            const sent = input instanceof Request ? await input.clone().json() : JSON.parse(init.body);
+            if (sent.model === "gpt-5.6-luna" && !new Headers(init?.headers ?? input.headers).has("Copilot-Session-Token")) {
+              return new Response(JSON.stringify({ error: { message: "nope", code: "model_not_supported" } }), { status: 400 });
+            }
+          }
+          return new Response("stream-ok", { status: 200 });
+        },
+      );
+
+      expect(calls.length).toBe(2);
+      expect(response.status).toBe(200);
+      const retryInit = calls[1].init;
+      const retryHeaders = new Headers(retryInit.headers);
+      expect(retryHeaders.get("Copilot-Session-Token")).toBe("jwt-abc");
+      const retryBody = JSON.parse(retryInit.body);
+      expect(retryBody.model).toBe("gpt-5.6-luna");
     } finally {
       globalThis.fetch = originalFetch;
     }
