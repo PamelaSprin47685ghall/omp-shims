@@ -16,9 +16,34 @@
 
 import { requestBody, requestUrl, addFetchHandler as sharedAddFetchHandler } from "../lib/fetch-chain.js";
 import { patchServe, readBody } from "../lib/inbound.js";
+import { gunzipSync, inflateSync, zstdDecompressSync } from "node:zlib";
 
 const COPILOT_HOSTS = ["api.individual.githubcopilot.com", "api.githubcopilot.com"];
 const DEFAULT_API_VERSION = "2026-08-01";
+
+/** Decompress binary request payload if compressed with zstd, gzip, or deflate. */
+function decompressBufferIfNeeded(buf) {
+  if (!buf || buf.length < 4) return buf;
+  // ZSTD magic: 0x28 0xB5 0x2F 0xFD
+  if (buf[0] === 0x28 && buf[1] === 0xb5 && buf[2] === 0x2f && buf[3] === 0xfd) {
+    try {
+      return zstdDecompressSync(buf);
+    } catch {}
+  }
+  // GZIP magic: 0x1F 0x8B
+  if (buf[0] === 0x1f && buf[1] === 0x8b) {
+    try {
+      return gunzipSync(buf);
+    } catch {}
+  }
+  // Deflate magic: 0x78 (0x9C, 0x01, 0xDA)
+  if (buf[0] === 0x78 && (buf[1] === 0x9c || buf[1] === 0x01 || buf[1] === 0xda)) {
+    try {
+      return inflateSync(buf);
+    } catch {}
+  }
+  return buf;
+}
 
 const AUTO_MODEL_ENTRIES = [
   {
@@ -176,18 +201,15 @@ export function install(config, context) {
     // Skip the negotiation endpoint itself to avoid infinite loops
     if (url.includes("/auto?")) return next(input, init);
 
-    // `requestBody` only sees string bodies. The /v1/responses route builds its
-    // upstream call as a Request with a streamed body, which left this layer
-    // blind and bypassed negotiation entirely (upstream then answered
-    // 400 model_not_supported because no Copilot-Session-Token was attached).
-    // Clone the Request to read the JSON without consuming the live body.
     let bodyStr = requestBody(input, init);
     // When we buffer a non-string body (stream/binary init.body), downstream
     // calls must reuse the buffered string — the original was consumed here.
     let bufferedBody = null;
     if (bodyStr === undefined && input instanceof Request) {
       try {
-        bodyStr = await input.clone().text();
+        const ab = await input.clone().arrayBuffer();
+        const decomp = decompressBufferIfNeeded(Buffer.from(ab));
+        bodyStr = decomp.toString("utf8");
       } catch {
         bodyStr = undefined;
       }
@@ -196,11 +218,18 @@ export function install(config, context) {
       bodyStr === undefined &&
       init &&
       init.body != null &&
-      typeof init.body !== "string" &&
-      /json/i.test(new Headers(init.headers).get("Content-Type") ?? "application/json")
+      typeof init.body !== "string"
     ) {
       try {
-        bodyStr = await new Response(init.body).text();
+        let rawBuf;
+        if (init.body instanceof Uint8Array || Buffer.isBuffer(init.body)) {
+          rawBuf = Buffer.from(init.body.buffer, init.body.byteOffset, init.body.byteLength);
+        } else {
+          const ab = await new Response(init.body).arrayBuffer();
+          rawBuf = Buffer.from(ab);
+        }
+        const decomp = decompressBufferIfNeeded(rawBuf);
+        bodyStr = decomp.toString("utf8");
         bufferedBody = bodyStr;
       } catch {
         bodyStr = undefined;
@@ -208,9 +237,17 @@ export function install(config, context) {
     }
     if (!bodyStr) return next(input, init);
 
-    // Replay the original call with the buffered string body where needed.
-    const forward = (fInput, fInit) =>
-      bufferedBody !== null && fInit === init ? next(fInput, { ...fInit, body: bufferedBody }) : next(fInput, fInit);
+    // Replay the original call with the buffered string body where needed,
+    // stripping any compression header since bufferedBody is uncompressed.
+    const forward = (fInput, fInit) => {
+      if (bufferedBody !== null && fInit === init) {
+        const fHeaders = new Headers(fInit?.headers);
+        fHeaders.delete("Content-Encoding");
+        fHeaders.delete("content-encoding");
+        return next(fInput, { ...fInit, headers: fHeaders, body: bufferedBody });
+      }
+      return next(fInput, fInit);
+    };
 
     let parsed;
     try {
@@ -298,6 +335,10 @@ export function install(config, context) {
       if (!headers.has("Copilot-Integration-Id")) {
         headers.set("Copilot-Integration-Id", "vscode-chat");
       }
+      // Downstream request is sent as uncompressed UTF-8 JSON text:
+      headers.delete("Content-Encoding");
+      headers.delete("content-encoding");
+      headers.set("Content-Type", "application/json");
 
       // Update model in request body
       parsed.model = selectedModelId;

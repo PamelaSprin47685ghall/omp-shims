@@ -224,3 +224,58 @@ describe("copilot-auto streamed init.body negotiation", () => {
     }
   });
 });
+
+describe("copilot-auto zstd compressed body decompression", () => {
+  test("decompresses zstd compressed init.body, negotiates on 400, retries with uncompressed body and session token", async () => {
+    const { context, handlers } = fakeContext();
+    install({ enabled: true }, context);
+
+    const zlib = require("node:zlib");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/auto?")) {
+        return new Response(
+          JSON.stringify({
+            session_token: "jwt-zstd-ok",
+            selected_model: { id: "gpt-5.6-luna", supported_endpoints: ["/responses"] },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("unexpected", { status: 599 });
+    };
+
+    try {
+      const handler = handlers[0];
+      const payload = JSON.stringify({ model: "gpt-5.6-luna", input: [{ role: "user", content: "ls -la" }] });
+      const compressed = zlib.zstdCompressSync(Buffer.from(payload));
+      const calls = [];
+
+      const response = await handler(
+        "https://api.individual.githubcopilot.com/responses",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Content-Encoding": "zstd", Authorization: "Bearer gho_test" },
+          body: compressed,
+        },
+        async (_input, init) => {
+          calls.push(init);
+          const hdrs = new Headers(init.headers);
+          if (!hdrs.has("Copilot-Session-Token")) {
+            return new Response(JSON.stringify({ error: { code: "model_not_supported" } }), { status: 400 });
+          }
+          return new Response("zstd-test-ok", { status: 200 });
+        },
+      );
+
+      expect(calls.length).toBe(2);
+      expect(response.status).toBe(200);
+      expect(new Headers(calls[1].headers).get("Copilot-Session-Token")).toBe("jwt-zstd-ok");
+      expect(new Headers(calls[1].headers).has("Content-Encoding")).toBe(false);
+      const retryBody = JSON.parse(calls[1].body);
+      expect(retryBody.model).toBe("gpt-5.6-luna");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
