@@ -22,12 +22,15 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { createRequire } from "node:module";
+
+const require_ = createRequire(import.meta.url);
 
 const DEFAULT_POLL_MS = 60_000;
 
 /** Read kiro-cli's social token row as a plain object, or undefined. */
 function readKiroCliToken(dbPath) {
-  const { Database } = require("bun:sqlite");
+  const { Database } = require_("bun:sqlite");
   const db = new Database(dbPath, { readonly: true });
   try {
     const row = db.query("SELECT value FROM auth_kv WHERE key = 'kirocli:social:token'").get();
@@ -78,7 +81,7 @@ export function install(config, context) {
     const signature = `${token.access_token}:${expiresAt}`;
     if (signature === lastSignature) return;
 
-    const { Database } = require("bun:sqlite");
+    const { Database } = require_("bun:sqlite");
     let db;
     try {
       db = new Database(agentDb);

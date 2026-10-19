@@ -8,15 +8,15 @@
 // Env:
 //   OMP_SHIMS_IPV6_TTL_MS   DNS cache TTL (default 60000)
 
-const dns = require("node:dns/promises");
-const os = require("node:os");
+import { lookup } from "node:dns/promises";
+import { networkInterfaces } from "node:os";
 
 const IP_OR_LOCAL = /^(?:localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0|\[::1\])$/i;
 const IP_LITERAL = /^[0-9.]+$|^\[?[0-9a-fA-F:]+\]?$/;
 
 function hasGlobalIPv6() {
   try {
-    for (const list of Object.values(os.networkInterfaces())) {
+    for (const list of Object.values(networkInterfaces())) {
       for (const iface of list ?? []) {
         if (iface.family === "IPv6" && !iface.internal && !iface.address.toLowerCase().startsWith("fe80:")) {
           return true;
@@ -45,7 +45,7 @@ export function install(config, { addFetchHandler, preserveResponseUrl }) {
 
     let entry = null;
     try {
-      const addresses = await dns.lookup(hostname, { all: true });
+      const addresses = await lookup(hostname, { all: true });
       const v6 = [];
       const v4 = [];
       for (const address of addresses) {
