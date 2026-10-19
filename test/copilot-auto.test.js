@@ -170,3 +170,57 @@ describe("copilot-auto Request-body negotiation (/v1/responses route)", () => {
     }
   });
 });
+
+describe("copilot-auto streamed init.body negotiation", () => {
+  test("buffers a ReadableStream body, negotiates on 400, retries with token and string body", async () => {
+    const { context, handlers } = fakeContext();
+    install({ enabled: true }, context);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      if (String(url).includes("/auto?")) {
+        return new Response(
+          JSON.stringify({
+            session_token: "jwt-stream",
+            selected_model: { id: "gpt-5.6-luna", supported_endpoints: ["/responses"] },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response("unexpected", { status: 599 });
+    };
+
+    try {
+      const handler = handlers[0];
+      const payload = JSON.stringify({ model: "gpt-5.6-luna", input: [{ role: "user", content: "ls" }] });
+      const calls = [];
+      const response = await handler(
+        "https://api.individual.githubcopilot.com/responses",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer gho_test" },
+          body: new Response(payload).body,
+          duplex: "half",
+        },
+        async (_input, init) => {
+          calls.push(init);
+          const bodyText = typeof init.body === "string" ? init.body : await new Response(init.body).text();
+          const sent = JSON.parse(bodyText);
+          const hasToken = new Headers(init.headers).has("Copilot-Session-Token");
+          if (!hasToken) {
+            return new Response(JSON.stringify({ error: { code: "model_not_supported" } }), { status: 400 });
+          }
+          return new Response("ok", { status: 200 });
+        },
+      );
+
+      expect(calls.length).toBe(2);
+      expect(response.status).toBe(200);
+      // original body must survive buffering and arrive intact on first pass
+      expect(JSON.parse(await new Response(calls[0].body).text()).model).toBe("gpt-5.6-luna");
+      expect(new Headers(calls[1].headers).get("Copilot-Session-Token")).toBe("jwt-stream");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

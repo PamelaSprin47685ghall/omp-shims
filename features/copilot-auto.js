@@ -182,6 +182,9 @@ export function install(config, context) {
     // 400 model_not_supported because no Copilot-Session-Token was attached).
     // Clone the Request to read the JSON without consuming the live body.
     let bodyStr = requestBody(input, init);
+    // When we buffer a non-string body (stream/binary init.body), downstream
+    // calls must reuse the buffered string — the original was consumed here.
+    let bufferedBody = null;
     if (bodyStr === undefined && input instanceof Request) {
       try {
         bodyStr = await input.clone().text();
@@ -189,7 +192,25 @@ export function install(config, context) {
         bodyStr = undefined;
       }
     }
+    if (
+      bodyStr === undefined &&
+      init &&
+      init.body != null &&
+      typeof init.body !== "string" &&
+      /json/i.test(new Headers(init.headers).get("Content-Type") ?? "application/json")
+    ) {
+      try {
+        bodyStr = await new Response(init.body).text();
+        bufferedBody = bodyStr;
+      } catch {
+        bodyStr = undefined;
+      }
+    }
     if (!bodyStr) return next(input, init);
+
+    // Replay the original call with the buffered string body where needed.
+    const forward = (fInput, fInit) =>
+      bufferedBody !== null && fInit === init ? next(fInput, { ...fInit, body: bufferedBody }) : next(fInput, fInit);
 
     let parsed;
     try {
@@ -218,7 +239,7 @@ export function install(config, context) {
     // gpt-4.1) succeed on the first pass and never pay the negotiation.
     let fallbackError = null;
     if (!needsAutoNegotiation) {
-      const response = await next(input, init);
+      const response = await forward(input, init);
       if (response.status !== 400) return response;
       const errText = await response.clone().text().catch(() => "");
       if (!errText.includes("model_not_supported")) return response;
@@ -257,7 +278,7 @@ export function install(config, context) {
 
       if (!autoRes.ok) {
         context.log?.(`copilot-auto: negotiation failed with HTTP ${autoRes.status}`);
-        return fallbackError ?? next(input, init);
+        return fallbackError ?? forward(input, init);
       }
 
       const autoData = await autoRes.json();
@@ -266,7 +287,7 @@ export function install(config, context) {
       const selectedModelId = selectedModel?.id;
 
       if (!sessionToken || !selectedModelId) {
-        return fallbackError ?? next(input, init);
+        return fallbackError ?? forward(input, init);
       }
 
       context.log?.(`copilot-auto: selected model "${selectedModelId}"`);
@@ -333,7 +354,7 @@ export function install(config, context) {
       });
     } catch (err) {
       context.log?.(`copilot-auto: error during negotiation: ${err?.message ?? err}`);
-      return next(input, init);
+      return forward(input, init);
     }
   });
 }
