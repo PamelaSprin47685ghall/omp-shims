@@ -46,7 +46,7 @@ function getBrokerToken() {
   }
 }
 
-function parseCooldownMs(bodyText, defaultMs) {
+export function parseCooldownMs(bodyText, defaultMs) {
   if (!bodyText) return defaultMs;
   const secMatch = bodyText.match(/"(?:quotaResetDelay|retryDelay)"\s*:\s*"([0-9.]+)(?:s)?"/i);
   if (secMatch) {
@@ -64,7 +64,7 @@ function parseCooldownMs(bodyText, defaultMs) {
   return defaultMs;
 }
 
-function sortByConfiguredOrder(accounts, emailOrder) {
+export function sortByConfiguredOrder(accounts, emailOrder) {
   return [...accounts].sort((a, b) => {
     const idxA = emailOrder.indexOf(a.email.toLowerCase());
     const idxB = emailOrder.indexOf(b.email.toLowerCase());

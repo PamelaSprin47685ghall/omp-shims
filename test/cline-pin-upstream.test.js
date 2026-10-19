@@ -1,0 +1,57 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { install } from "../features/cline-pin-upstream.js";
+import { DEFAULTS } from "../lib/config.js";
+import { fakeContext, recordingNext } from "./helpers.js";
+
+const URL = "https://api.cline.bot/api/v1/chat/completions";
+
+async function send(config, body, init = {}) {
+  const { context, handlers } = fakeContext();
+  install({ ...DEFAULTS["cline-pin-upstream"], ...config }, context);
+  const { next, calls } = recordingNext();
+  await handlers[0](URL, { method: "POST", body: JSON.stringify(body), ...init }, next);
+  return { body: JSON.parse(calls[0].init.body), headers: new Headers(calls[0].init.headers) };
+}
+
+afterEach(() => {
+  delete process.env.OMP_SHIMS_CLINE_API_KEY;
+});
+
+describe("cline-pin-upstream", () => {
+  test("pins per-model channels, stripping the cline-pass/ prefix", async () => {
+    const { body } = await send({}, { model: "cline-pass/deepseek-v4.1-flash" });
+    expect(body.providerOptions.gateway.only).toEqual(["deepseek"]);
+  });
+
+  test("falls back to the default upstream", async () => {
+    const { body } = await send({}, { model: "other" });
+    expect(body.providerOptions.gateway.only).toEqual(["openai-compatible-private"]);
+  });
+
+  test("keeps a pin the caller already set", async () => {
+    const { body } = await send({}, { model: "other", providerOptions: { gateway: { only: ["mine"] } } });
+    expect(body.providerOptions.gateway.only).toEqual(["mine"]);
+  });
+
+  test("adds Cline headers but no Authorization unless a key is configured", async () => {
+    const { headers } = await send({}, { model: "other" });
+    expect(headers.get("authorization")).toBeNull();
+    expect(headers.get("x-title")).toBe("Cline");
+  });
+
+  test("uses a configured key only when the request has no Authorization", async () => {
+    process.env.OMP_SHIMS_CLINE_API_KEY = "from-env";
+    expect((await send({}, { model: "x" })).headers.get("authorization")).toBe("Bearer from-env");
+    const existing = await send({}, { model: "x" }, { headers: { Authorization: "Bearer mine" } });
+    expect(existing.headers.get("authorization")).toBe("Bearer mine");
+  });
+
+  test("ignores other hosts and paths", async () => {
+    const { context, handlers } = fakeContext();
+    install(DEFAULTS["cline-pin-upstream"], context);
+    const { next, calls } = recordingNext();
+    const init = { method: "POST", body: "{}" };
+    await handlers[0]("https://api.cline.bot/api/v1/models", init, next);
+    expect(calls[0].init).toBe(init);
+  });
+});

@@ -43,7 +43,7 @@ const LOCATION_BACKOFF_MS = [500, 1000, 2000];
 const MIN_OUTPUT_BUDGET = 8192;
 
 /** Nudge text per continuation variant. Deliberately plain text, no markup. */
-const PROMPTS = {
+export const PROMPTS = {
   empty: "Continue your response from where you left off. Provide the final answer or the next required tool call.",
   malformed:
     "The function call was malformed and was not executed. Re-issue the intended call through the native function-calling interface with arguments matching the tool schema, or provide a text response.",
@@ -61,7 +61,7 @@ function saltedHash() {
 }
 
 /** The marker digest for `text` under continuation `variant`. */
-function continuationDigest(text, variant) {
+export function continuationDigest(text, variant) {
   const hash = saltedHash();
   return hash.update(text, "utf8").update("\0", "utf8").update(variant, "utf8").digest("hex");
 }
@@ -84,7 +84,7 @@ const THINKING_WRAPPERS = [
  * Runs a single incremental hasher over the text and compares at each candidate
  * digest position, so cost stays O(N) regardless of how many digests appear.
  */
-function findContinuationMarker(text) {
+export function findContinuationMarker(text) {
   const wrapper = THINKING_WRAPPERS.find((candidate) => text.startsWith(candidate.start)) ?? null;
   const wrapperLength = wrapper ? wrapper.start.length : 0;
 
@@ -146,7 +146,7 @@ function variantOf(hasher, hex) {
 }
 
 /** Visible text that is not inside a thinking block. */
-function textOutsideThinking(text) {
+export function textOutsideThinking(text) {
   return text
     .replace(/```(?:thinking|thought)\s*[\s\S]*?(?:```|$)/gi, "")
     .replace(/<(?:think|thinking|thought|scratchpad)>[\s\S]*?(?:<\/(?:think|thinking|thought|scratchpad)>|$)/gi, "")
@@ -186,7 +186,7 @@ function firstJsonObject(text) {
  * model narrating its plan as a JSON blob is stripped upstream, leaving the turn
  * empty. Recover the remainder so the continuation carries real content.
  */
-function planningLeakRemainder(text, toolNames) {
+export function planningLeakRemainder(text, toolNames) {
   const trimmed = text.trim();
   if (trimmed === "") return { leaked: false, visible: "" };
   if (!trimmed.startsWith("{")) return { leaked: false, visible: text };
@@ -233,7 +233,7 @@ function toolNamesOf(bodyString) {
  * as a normal stop is the honest representation once recovery has run or given
  * up.
  */
-function sanitizeTerminalBlock(block) {
+export function sanitizeTerminalBlock(block) {
   return block
     .replace(/"finishReason"\s*:\s*"MALFORMED_FUNCTION_CALL"/g, '"finishReason":"STOP"')
     .replace(/"finishMessage"\s*:\s*"(?:[^"\\]|\\.)*"/g, '"finishMessage":""');
@@ -253,7 +253,7 @@ function modelOf(bodyString) {
  * originally saw. Also repairs the model-first / model-last turn shapes the
  * Cloud Code Assist API rejects.
  */
-function splitContents(contents) {
+export function splitContents(contents) {
   if (!Array.isArray(contents)) return { contents, splits: 0 };
   const output = [];
   let splits = 0;
@@ -323,7 +323,7 @@ function splitBody(bodyString) {
 }
 
 /** Build the body that continues `state`'s turn with a `user` nudge. */
-function buildContinuation(bodyString, state, variant) {
+export function buildContinuation(bodyString, state, variant) {
   const parsed = JSON.parse(bodyString);
   const request = (parsed.request ??= {});
   const contents = Array.isArray(request.contents) ? request.contents.slice() : [];
