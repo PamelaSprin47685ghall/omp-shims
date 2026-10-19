@@ -13,7 +13,8 @@
 //   OMP_SHIMS_CLINE_PIN_HOST      default api.cline.bot
 //   OMP_SHIMS_CLINE_PIN_UPSTREAM  default openai-compatible-private
 //   OMP_SHIMS_CLINE_PIN_MODELS    optional comma list; empty = all models
-//   OMP_SHIMS_CLINE_API_KEY       default ClinePass API key
+//   OMP_SHIMS_CLINE_API_KEY       ClinePass API key, used only when the request
+//                                 carries no Authorization header (no default)
 
 import {
   addFetchHandler as sharedAddFetchHandler,
@@ -30,7 +31,7 @@ export function install(config, context) {
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
   const target = config.host ?? process.env.OMP_SHIMS_CLINE_PIN_HOST ?? "api.cline.bot";
   const defaultUpstream = config.upstream ?? process.env.OMP_SHIMS_CLINE_PIN_UPSTREAM ?? "openai-compatible-private";
-  const apiKey = config.apiKey ?? process.env.OMP_SHIMS_CLINE_API_KEY ?? "sk_5f4a7a2e7f38fbf6f3355dfac1b7802500415f1c8c7faff74cd04ec9a8f4a5d0";
+  const apiKey = config.apiKey ?? process.env.OMP_SHIMS_CLINE_API_KEY;
   const modelChannels = {
     ...DEFAULT_MODEL_CHANNELS,
     ...(config.modelChannels ?? {}),

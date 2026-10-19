@@ -12,8 +12,8 @@
 // Config (~/.omp/shims.json):
 //   "antigravity-account-routing": {
 //     "enabled": true,
-//     "ultraAccounts": ["kunweiz.260903@gmail.com"],
-//     "proAccounts": ["hassellbaldo114@gmail.com", "libaozhen06@gmail.com", "siniskiraiane801@gmail.com"],
+//     "ultraAccounts": ["ultra-account@example.com"],
+//     "proAccounts": ["pro-1@example.com", "pro-2@example.com"],
 //     "cooldownMs": 60000
 //   }
 
@@ -132,10 +132,11 @@ export function install(config, context) {
   const extraHosts = context.extraHosts ?? [];
   const log = context.log ?? (() => {});
 
-  const ultraEmails = (config.ultraAccounts ?? ["kunweiz.260903@gmail.com"]).map((e) => e.toLowerCase());
-  const proEmails = (
-    config.proAccounts ?? ["hassellbaldo114@gmail.com", "libaozhen06@gmail.com", "siniskiraiane801@gmail.com"]
-  ).map((e) => e.toLowerCase());
+  // No accounts are built in: tiers come from ~/.omp/shims.json. With no
+  // ultraAccounts configured, Ultra-only models fall through to the gateway's
+  // own credential; with no proAccounts, every non-Ultra account is a Pro one.
+  const ultraEmails = (config.ultraAccounts ?? []).map((e) => e.toLowerCase());
+  const proEmails = (config.proAccounts ?? []).map((e) => e.toLowerCase());
   const cooldownMs = Number.parseInt(String(config.cooldownMs ?? DEFAULT_COOLDOWN_MS), 10) || DEFAULT_COOLDOWN_MS;
   const ultraPattern = config.ultraModelPattern ? new RegExp(config.ultraModelPattern, "i") : DEFAULT_ULTRA_PATTERN;
   const agentDbPath = join(homedir(), ".omp", "agent", "agent.db");
