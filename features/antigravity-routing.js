@@ -25,7 +25,7 @@ const EFFORT_LEVELS = {
   high: "HIGH",
 };
 
-function resolveRoute(model, request, defaultLevel) {
+export function resolveRoute(model, request, defaultLevel) {
   const match = TIERED_PATTERN.exec(model);
   if (!match) return undefined;
 
