@@ -1,0 +1,19 @@
+name: Feature request
+description: Propose a new shim or an improvement to an existing one.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What breaks or misbehaves without this? Which provider or upstream?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
