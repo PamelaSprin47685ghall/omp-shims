@@ -39,6 +39,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `copilot-auto`: GitHub Copilot Auto model negotiation and dynamic `Copilot-Session-Token`
+  injection for gated models (`mai-code`, `gpt-5.6-luna`, etc.).
 - Test suite (`bun test`), Biome lint/format config, GitHub Actions CI.
 - README rewrite with complete configuration reference, CONTRIBUTING, SECURITY,
   issue and pull request templates, `.editorconfig`.

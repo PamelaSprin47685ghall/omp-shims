@@ -39,6 +39,7 @@ on every machine.
 | `antigravity-account-routing` | on | Routes Antigravity requests across your configured accounts by tier (see [below](#antigravity-account-routing)). |
 | `cline-pin-upstream` | on | Pins ClinePass `chat/completions` requests to a fixed upstream channel. |
 | `tool-id-hash` | on | Prefixes every inbound tool-call id with a hash8, and restores the client's ids on the way out (see [below](#tool-call-id-collisions)). |
+| `copilot-auto` | on | Negotiates GitHub Copilot `auto` routing and injects the required `Copilot-Session-Token` for gated models. |
 | `kiro-credential-sync` | on | Copies kiro-cli's rotated token into the auth-broker credential store so its refresh sweep stops failing. Started by the services only. |
 | `traffic-log` | **off** | Logs every inbound gateway request to hourly-rolling files (secrets in headers are redacted). |
 | `native-loop-guard` | **off** | OMP's own thinking-loop guard. Off by default, because it aborts and retries the identical body; nothing here compensates loops. |
@@ -150,6 +151,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | `plugin-bridge` | `OMP_SHIMS_PLUGIN_BRIDGE` |
 | `vendor-shims` | `OMP_SHIMS_VENDOR_SHIMS` |
 | `tool-id-hash` | `OMP_SHIMS_TOOL_ID_HASH` |
+| `copilot-auto` | `OMP_SHIMS_COPILOT_AUTO` |
 | `kiro-credential-sync` | `OMP_SHIMS_KIRO_CREDENTIAL_SYNC` |
 | `traffic-log` | `OMP_SHIMS_TRAFFIC_LOG` |
 | `native-loop-guard` | `OMP_SHIMS_NATIVE_LOOP_GUARD` |
@@ -174,6 +176,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | | `modelChannels` | | `deepseek-v4.1-flash → deepseek` |
 | | `apiKey` | `OMP_SHIMS_CLINE_API_KEY` | none |
 | `tool-id-hash` | | `OMP_SHIMS_TOOL_ID_SALT` | empty |
+| `copilot-auto` | `apiVersion` | `OMP_SHIMS_COPILOT_API_VERSION` | `2026-08-01` |
 | `kiro-credential-sync` | `dbPath` | `OMP_SHIMS_KIRO_SYNC_DB` | `~/.local/share/kiro-cli/data.sqlite3` |
 | | `pollMs` | `OMP_SHIMS_KIRO_SYNC_POLL` | `60000` |
 | `traffic-log` | `dir` | `OMP_SHIMS_TRAFFIC_LOG_DIR` | `~/.omp/gateway-logs` |
