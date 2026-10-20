@@ -1,5 +1,5 @@
 {
-  "$comment": "Lazy-router policy. Each entry is a provider/model plus an optional account 'tier' (a name or an ordered list); it expands at runtime into one unit per enabled account of that provider and tier, oldest account first (see lib/lazy-router/units.js). An entry without 'tier' takes every account of the provider. Effort 'capped' means min(requested, medium), anything else means high. 'sameAs' splices another period's list. A route with 'derive' reuses another route's lists filtered to the required input modalities. 'modelTraits' corrects registry traits where a provider plugin is stricter than the registry says.",
+  "$comment": "Lazy-router policy. Each entry is a provider/model plus an optional account 'tier' (a name or an ordered list); it expands at runtime into one unit per enabled account of that provider and tier, oldest account first (see lib/lazy-router/units.js). An entry without 'tier' takes every account of the provider. Effort 'capped' means min(requested, medium), a level such as 'low' means exactly that level, and no effort means high. 'sameAs' splices another period's list. A route with 'derive' reuses another route's lists filtered to the required input modalities. 'modelTraits' corrects registry traits where a provider plugin is stricter than the registry says.",
   "contextWindow": 500000,
   "maxOutputTokens": 64000,
   "routes": {
@@ -18,7 +18,8 @@
             "effort": "capped"
           },
           {
-            "model": "commandcode/minimax/minimax-m3.1-flash:free"
+            "model": "commandcode/minimax/minimax-m3.1-flash:free",
+            "effort": "low"
           },
           {
             "model": "google-antigravity/gemini-4-argon",
@@ -68,7 +69,8 @@
       "periods": {
         "peak": [
           {
-            "model": "commandcode/minimax/minimax-m3.1-flash:free"
+            "model": "commandcode/minimax/minimax-m3.1-flash:free",
+            "effort": "low"
           },
           {
             "model": "google-antigravity/gemini-3.8-flash"
@@ -88,7 +90,8 @@
         ],
         "offPeak": [
           {
-            "model": "commandcode/minimax/minimax-m3.1-flash:free"
+            "model": "commandcode/minimax/minimax-m3.1-flash:free",
+            "effort": "low"
           },
           {
             "model": "ctyun/deepseek-v4-pro-0813-oc"
@@ -117,6 +120,11 @@
     }
   },
   "modelTraits": {
+    "commandcode/minimax/minimax-m3.1-flash:free": {
+      "$comment": "The commandcode plugin catalog marks this model as non-reasoning and drops reasoning_effort, yet /alpha/generate always thinks and honours params.reasoning_effort (low/medium/high accepted, minimal answered 400). The attempt layer writes the effort into the provider body (upstream-effort.js).",
+      "reasoning": true,
+      "efforts": ["low", "medium", "high"]
+    },
     "qoder-cn/qwen3.8-flash": {
       "$comment": "The registry advertises minimal..high, but the qoder-cn plugin only accepts low/medium/xhigh upstream and rounds other levels UP (high -> xhigh). Levels both accept:",
       "efforts": ["low", "medium"]

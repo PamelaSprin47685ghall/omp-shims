@@ -5,6 +5,13 @@ import { EFFORT_POLICY, fitEffort, probeEffort, resolveEffort, targetEffort } fr
 const model = (efforts, extra = {}) => ({ reasoning: true, efforts, canDisable: false, ...extra });
 
 describe("targetEffort", () => {
+  test("a fixed level is used whatever the client asked for", () => {
+    expect(targetEffort("low", "max")).toBe("low");
+    expect(targetEffort("low", undefined)).toBe("low");
+    expect(resolveEffort({ policy: "low", requested: "high", traits: model(["low", "medium", "high"]) })).toBe("low");
+    expect(resolveEffort({ policy: "low", requested: "high", traits: model(["medium", "high"]) })).toBe("medium");
+  });
+
   test("capped entries take min(requested, medium), medium when absent", () => {
     expect(targetEffort(EFFORT_POLICY.CAPPED, "max")).toBe("medium");
     expect(targetEffort(EFFORT_POLICY.CAPPED, "high")).toBe("medium");

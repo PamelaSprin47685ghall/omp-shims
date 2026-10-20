@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { isGatewayProcess } from "../features/lazy-router.js";
 import { activePin } from "../lib/credential-pin.js";
+import { isGatewayProcess } from "../lib/gateway-process.js";
 import { CredentialStore } from "../lib/lazy-router/credentials.js";
 import { decodeJwtPayload, normalizeTier, TIER_RESOLVERS, TierDirectory } from "../lib/lazy-router/tiers.js";
 import { buildUnits, UnitDirectory } from "../lib/lazy-router/units.js";

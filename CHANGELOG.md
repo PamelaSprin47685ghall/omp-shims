@@ -23,6 +23,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   same-origin assets under `/assets/lazy-status/`), and `nextSwitch` / `alternate`
   (the other period's order) in the status JSON, which lists only units that can
   serve each route.
+- `sse-heartbeat`: SSE `: keep-alive` comments between events after an idle
+  interval (default 15 s) on every gateway event stream, plus
+  `X-Accel-Buffering: no` / `Cache-Control: no-transform`. Gateway process only;
+  off by default.
+- `lazy-router`: a route entry can fix its effort level (`"effort": "low"`). The
+  Command Code `minimax-m3.1-flash:free` entries think at `low`; its trait
+  correction marks it reasoning-capable (low/medium/high), and the attempt layer
+  writes `params.reasoning_effort` into the provider body, which the plugin would
+  otherwise drop.
 - `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - `models-bridge`: expose custom providers and models declared in `models.yml` to the
   auth-gateway reverse proxy, supplying credentials in memory and making them routable.

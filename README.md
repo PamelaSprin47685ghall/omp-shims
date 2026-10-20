@@ -44,6 +44,7 @@ on every machine.
 | `kiro-credential-sync` | on | Copies kiro-cli's rotated token into the auth-broker credential store so its refresh sweep stops failing. Started by the services only. |
 | `traffic-log` | **off** | Logs every inbound gateway request to hourly-rolling files (secrets in headers are redacted). |
 | `lazy-router` | **off** | Adds `lazy/default`, `lazy/task` and `lazy/vision`: virtual models that pick the first healthy (provider, account) unit from a peak-aware route table selected by account tier (see [below](#lazy-router)). |
+| `sse-heartbeat` | **off** | Writes an SSE comment (`: keep-alive`) between events when a gateway event stream has been silent for `intervalMs`, so proxies and NATs do not cut long-thinking streams (see [below](#sse-heartbeat)). Gateway process only. |
 | `native-loop-guard` | **off** | OMP's own thinking-loop guard. Off by default, because it aborts and retries the identical body; nothing here compensates loops. |
 
 `plugin-bridge` supplies credentials in memory only. Two features do write to
@@ -158,6 +159,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | `kiro-credential-sync` | `OMP_SHIMS_KIRO_CREDENTIAL_SYNC` |
 | `traffic-log` | `OMP_SHIMS_TRAFFIC_LOG` |
 | `lazy-router` | `OMP_SHIMS_LAZY_ROUTER` |
+| `sse-heartbeat` | `OMP_SHIMS_SSE_HEARTBEAT` |
 | `native-loop-guard` | `OMP_SHIMS_NATIVE_LOOP_GUARD` |
 
 ### Per-feature settings
@@ -197,6 +199,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | | `statusPath` | | `/v1/lazy/status` |
 | | `codexHttpTransport` (sets `PI_CODEX_WEBSOCKET=0`) | | `true` |
 | | `out`, `logUpstreamBody` | | none, `false` |
+| `sse-heartbeat` | `intervalMs` | | `15000` |
 
 ### Plugin credentials
 
@@ -280,9 +283,14 @@ account.
   holidays and adjusted make-up working days (调休) follow the bundled
   `holidays-cn.json`; years marked `"estimate"` are a best guess until the State
   Council publishes the official schedule.
-- **Effort**: entries marked `capped` get `min(requested, medium)`, others `high`,
-  stepped down to the nearest level the model supports. Effort and
-  `max_tokens = 64000` are always sent explicitly, in each API format's own field.
+- **Effort**: entries marked `capped` get `min(requested, medium)`, entries naming
+  a level (`"effort": "low"`) always get that level, others `high`; stepped down to
+  the nearest level the model supports. Effort and `max_tokens = 64000` are always
+  sent explicitly, in each API format's own field. `modelTraits` corrects a model's
+  reasoning traits where the provider plugin's catalog is wrong; for providers
+  whose plugin drops the effort of such a model (Command Code), the attempt layer
+  writes it into the provider body itself (`lib/lazy-router/upstream-effort.js`).
+  The Command Code `minimax-m3.1-flash:free` entries think at `low`.
 - **Failure handling**: the verdict is taken on the upstream status, before a byte
   is streamed. A failed unit is probed with `Reply OK`; if the probe fails the
   unit+model cools down (re-probed every `probeIntervalMs`) and the next unit is
@@ -313,6 +321,29 @@ router runs only in the `auth-gateway` process (shims.json is shared with the
 broker and interactive sessions). While it is on, OpenAI Codex uses HTTP/SSE
 instead of its pooled WebSocket so the credential pin applies
 (`codexHttpTransport: false` opts out).
+
+### SSE heartbeat
+
+`sse-heartbeat` keeps quiet event streams alive between the gateway and its
+clients. When a `text/event-stream` response (lazy or not, any API format) has
+written nothing for `intervalMs` (default 15 s), it writes the SSE comment line
+`: keep-alive` followed by a blank line. Conforming SSE parsers ignore comments;
+the OpenAI and Anthropic SDKs and OMP's own client were checked.
+
+- The comment is written only between events (the last forwarded bytes end with
+  a blank line), so an event is never split.
+- The source is read only when the client asks for more data, nothing is
+  buffered, and the idle clock restarts on every forwarded chunk. The timer stops
+  when the stream ends, errors, or the client goes away.
+- Its `Bun.serve` wrap is the outermost one, so it only sees a response once the
+  handlers inside have decided it: the lazy router's failover still happens
+  before the first byte.
+- SSE responses also get `X-Accel-Buffering: no` and `Cache-Control: no-transform`
+  (`no-cache` when none was set). Other responses are untouched.
+
+```json
+{ "features": { "sse-heartbeat": { "enabled": true, "intervalMs": 15000 } } }
+```
 
 ## CLI
 

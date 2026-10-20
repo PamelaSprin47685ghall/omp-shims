@@ -33,6 +33,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { report } from "../lib/bootstrap.js";
+import { isGatewayProcess } from "../lib/gateway-process.js";
 import { readBody, wrapServe } from "../lib/inbound.js";
 import { createAttemptLayer } from "../lib/lazy-router/attempt.js";
 import { HolidayCalendar, loadHolidayData, PeakSchedule } from "../lib/lazy-router/calendar.js";
@@ -191,17 +192,8 @@ function preferCodexHttp(config) {
   }
 }
 
-/** The subcommand that serves the gateway; the router belongs in that process only. */
-const GATEWAY_COMMAND = "auth-gateway";
-
-/**
- * True in the auth-gateway process. shims.json is shared with the auth-broker
- * and interactive sessions, which must not answer lazy models, publish the
- * status path, switch Codex transport or look up account tiers.
- */
-export function isGatewayProcess(argv = process.argv) {
-  return argv.includes(GATEWAY_COMMAND);
-}
+/** Kept for callers that import it from here; the check lives in lib/gateway-process.js. */
+export { isGatewayProcess };
 
 export function install(config, context) {
   if (config?.enabled === false) return;

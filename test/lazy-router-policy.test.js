@@ -111,6 +111,35 @@ describe("bundled route tables", () => {
   });
 });
 
+describe("fixed effort levels", () => {
+  test("commandcode minimax thinks at low effort wherever it is listed", () => {
+    const efforts = [
+      ["default", PERIOD.PEAK],
+      ["default", PERIOD.OFF_PEAK],
+      ["task", PERIOD.PEAK],
+      ["task", PERIOD.OFF_PEAK],
+    ].flatMap(([route, period]) =>
+      policy
+        .candidates(route, period, units)
+        .candidates.filter((c) => c.model === "commandcode/minimax/minimax-m3.1-flash:free")
+        .map((c) => c.effort),
+    );
+    expect(efforts).toEqual(["low", "low", "low", "low"]);
+  });
+
+  test("the minimax trait correction records the levels the endpoint accepts", () => {
+    const traits = policy.modelTraits["commandcode/minimax/minimax-m3.1-flash:free"];
+    expect(traits.reasoning).toBe(true);
+    expect(traits.efforts).toEqual(["low", "medium", "high"]);
+  });
+
+  test("an unknown effort is rejected when the table loads", () => {
+    const data = loadPolicyData();
+    data.routes.task.periods.peak = [{ model: "commandcode/minimax/minimax-m3.1-flash:free", effort: "turbo" }];
+    expect(() => new RoutePolicy(data).candidates("task", PERIOD.PEAK, units)).toThrow(/unknown effort "turbo"/);
+  });
+});
+
 describe("runtime expansion", () => {
   test("a newly added account joins its tier without any table change", () => {
     const more = [...ACCOUNTS, { id: 17, provider: "openai-codex", tier: "plus" }];
