@@ -23,6 +23,19 @@ describe("cline-pin-upstream", () => {
     expect(body.providerOptions.gateway.only).toEqual(["deepseek"]);
   });
 
+  test("supports providerOptions.gateway.order routing for glm-5.3-flash", async () => {
+    const { body } = await send({}, { model: "cline-pass/glm-5.3-flash" });
+    expect(body.providerOptions.gateway.order).toEqual([
+      "makora",
+      "digitalocean",
+      "wafer",
+      "baseten",
+      "inference-net",
+      "together",
+    ]);
+    expect(body.providerOptions.gateway.only).toBeUndefined();
+  });
+
   test("falls back to the default upstream", async () => {
     const { body } = await send({}, { model: "other" });
     expect(body.providerOptions.gateway.only).toEqual(["openai-compatible-private"]);

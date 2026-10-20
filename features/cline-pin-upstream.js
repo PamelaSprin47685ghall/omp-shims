@@ -18,9 +18,29 @@
 
 import { requestBody, requestUrl, addFetchHandler as sharedAddFetchHandler } from "../lib/fetch-chain.js";
 
-const DEFAULT_MODEL_CHANNELS = {
-  "deepseek-v4.1-flash": ["deepseek"],
-  "cline-pass/deepseek-v4.1-flash": ["deepseek"],
+const DEFAULT_MODEL_ROUTING = {
+  "deepseek-v4.1-flash": { only: ["deepseek"] },
+  "cline-pass/deepseek-v4.1-flash": { only: ["deepseek"] },
+  "glm-5.3-flash": {
+    order: [
+      "makora",
+      "digitalocean",
+      "wafer",
+      "baseten",
+      "inference-net",
+      "together",
+    ],
+  },
+  "cline-pass/glm-5.3-flash": {
+    order: [
+      "makora",
+      "digitalocean",
+      "wafer",
+      "baseten",
+      "inference-net",
+      "together",
+    ],
+  },
 };
 
 export function install(config, context) {
@@ -28,8 +48,9 @@ export function install(config, context) {
   const target = process.env.OMP_SHIMS_CLINE_PIN_HOST || config.host || "api.cline.bot";
   const defaultUpstream = process.env.OMP_SHIMS_CLINE_PIN_UPSTREAM || config.upstream || "openai-compatible-private";
   const apiKey = process.env.OMP_SHIMS_CLINE_API_KEY || config.apiKey;
-  const modelChannels = {
-    ...DEFAULT_MODEL_CHANNELS,
+  const modelRouting = {
+    ...DEFAULT_MODEL_ROUTING,
+    ...(config.modelRouting ?? {}),
     ...(config.modelChannels ?? {}),
   };
   const modelFilter = (process.env.OMP_SHIMS_CLINE_PIN_MODELS || config.models || "")
@@ -54,23 +75,27 @@ export function install(config, context) {
 
     if (modelFilter.length > 0 && !modelFilter.includes(parsed.model)) return next(input, init);
 
-    // Determine channel for model
+    // Determine routing for model
     const model = parsed.model ?? "";
     const strippedModel = model.startsWith("cline-pass/") ? model.slice("cline-pass/".length) : model;
-    const targetChannels =
-      modelChannels[model] ??
-      modelChannels[strippedModel] ??
-      (Array.isArray(defaultUpstream) ? defaultUpstream : [defaultUpstream]);
+    const targetRouting =
+      modelRouting[model] ??
+      modelRouting[strippedModel] ??
+      (Array.isArray(defaultUpstream) ? { only: defaultUpstream } : typeof defaultUpstream === "object" ? defaultUpstream : { only: [defaultUpstream] });
 
-    // If caller didn't provide specific pin, inject it
-    const existing = parsed.providerOptions?.gateway?.only;
-    if (!Array.isArray(existing) || existing.length === 0) {
+    // If caller didn't provide specific gateway routing, inject it
+    const existingGateway = parsed.providerOptions?.gateway;
+    if (!existingGateway || (!existingGateway.only && !existingGateway.order)) {
+      const gateway = { ...(parsed.providerOptions?.gateway ?? {}) };
+      if (Array.isArray(targetRouting)) {
+        gateway.only = targetRouting;
+      } else if (typeof targetRouting === "object" && targetRouting !== null) {
+        if (Array.isArray(targetRouting.only)) gateway.only = targetRouting.only;
+        if (Array.isArray(targetRouting.order)) gateway.order = targetRouting.order;
+      }
       parsed.providerOptions = {
         ...(parsed.providerOptions ?? {}),
-        gateway: {
-          ...(parsed.providerOptions?.gateway ?? {}),
-          only: targetChannels,
-        },
+        gateway,
       };
     }
 
