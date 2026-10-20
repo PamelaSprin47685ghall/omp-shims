@@ -1,67 +1,107 @@
 import { describe, expect, test } from "bun:test";
 import { PERIOD } from "../lib/lazy-router/calendar.js";
 import { loadPolicyData, RoutePolicy } from "../lib/lazy-router/policy.js";
+import { UnitDirectory } from "../lib/lazy-router/units.js";
 
+/**
+ * Synthetic accounts in the shape of a typical deployment: several accounts
+ * for the tiered providers and the key-based pools, one for most others, and
+ * none for a provider whose key lives in models.yml. Ids only fix the order.
+ */
+const ACCOUNTS = [
+  { id: 1, provider: "google-antigravity", tier: "ultra" },
+  { id: 2, provider: "cline-pass" },
+  { id: 3, provider: "kiro" },
+  { id: 4, provider: "commandcode" },
+  { id: 5, provider: "openai-codex", tier: "plus" },
+  { id: 6, provider: "openai-codex", tier: "pro" },
+  { id: 7, provider: "xai-oauth" },
+  { id: 8, provider: "charm-hyper" },
+  { id: 9, provider: "google-antigravity", tier: "pro" },
+  { id: 10, provider: "google-antigravity", tier: "pro" },
+  { id: 11, provider: "google-antigravity", tier: "pro" },
+  { id: 12, provider: "qoder-cn" },
+  { id: 13, provider: "cline-pass" },
+  { id: 14, provider: "nvidia" },
+  { id: 15, provider: "opencode-go" },
+  { id: 16, provider: "ollama-cloud" },
+];
+
+const tierSource = (accounts, version = 1) => ({ version, ready: Promise.resolve(), accounts: () => accounts });
 const policy = new RoutePolicy(loadPolicyData());
-const order = (route, period) => policy.candidates(route, period).candidates.map((c) => `${c.unit.label} ${c.model}`);
+const units = new UnitDirectory({ tiers: tierSource(ACCOUNTS) });
+const order = (route, period, directory = units) =>
+  policy.candidates(route, period, directory).candidates.map((c) => `${c.unit.label} ${c.model}`);
 
 describe("bundled route tables", () => {
-  test("peak default follows the priority list, expanding unit groups in credential order", () => {
+  test("the bundled tables name no accounts", () => {
+    const text = JSON.stringify(loadPolicyData());
+    expect(text).not.toContain("credentialId");
+    expect(text).not.toContain('"units"');
+    expect(text).not.toMatch(/@/);
+  });
+
+  test("peak default follows the priority list, tiers in the listed order, accounts oldest first", () => {
     expect(order("default", PERIOD.PEAK)).toEqual([
-      "cx-18 openai-codex/gpt-6.1-sol",
-      "ki-16 kiro/claude-opus-5-5",
-      "cc-17 commandcode/minimax/minimax-m3.1-flash:free",
-      "ag-u5 google-antigravity/gemini-4-argon",
-      "ag-p22 google-antigravity/gemini-4-argon",
-      "ag-p23 google-antigravity/gemini-4-argon",
-      "ag-p24 google-antigravity/gemini-4-argon",
-      "cx-19 openai-codex/gpt-6.1-sol",
-      "cp-15 cline-pass/glm-5.3-flash",
-      "cp-27 cline-pass/glm-5.3-flash",
-      "ol-31 ollama-cloud/glm-5.3-flash",
-      "qd-26 qoder-cn/qwen3.8-flash",
-      "ch-21 charm-hyper/qwen3.8-flash",
-      "xa-20 xai-oauth/grok-4.7",
-      "ct-yml ctyun/deepseek-v4-pro-0813-oc",
-      "nv-29 nvidia/z-ai/glm-5.3-flash",
+      "openai-codex:plus#1 openai-codex/gpt-6.1-sol",
+      "kiro kiro/claude-opus-5-5",
+      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
+      "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
+      "google-antigravity:pro#1 google-antigravity/gemini-4-argon",
+      "google-antigravity:pro#2 google-antigravity/gemini-4-argon",
+      "google-antigravity:pro#3 google-antigravity/gemini-4-argon",
+      "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
+      "cline-pass#1 cline-pass/glm-5.3-flash",
+      "cline-pass#2 cline-pass/glm-5.3-flash",
+      "ollama-cloud ollama-cloud/glm-5.3-flash",
+      "qoder-cn qoder-cn/qwen3.8-flash",
+      "charm-hyper charm-hyper/qwen3.8-flash",
+      "xai-oauth xai-oauth/grok-4.7",
+      "ctyun ctyun/deepseek-v4-pro-0813-oc",
+      "nvidia nvidia/z-ai/glm-5.3-flash",
     ]);
   });
 
   test("off-peak default is opencode-go first, then the whole peak list", () => {
     const offPeak = order("default", PERIOD.OFF_PEAK);
-    expect(offPeak[0]).toBe("og-30 opencode-go/deepseek-v4.1-flash");
+    expect(offPeak[0]).toBe("opencode-go opencode-go/deepseek-v4.1-flash");
     expect(offPeak.slice(1)).toEqual(order("default", PERIOD.PEAK));
   });
 
   test("capped entries are exactly the codex, kiro and gemini-4 ones", () => {
     const capped = policy
-      .candidates("default", PERIOD.PEAK)
+      .candidates("default", PERIOD.PEAK, units)
       .candidates.filter((c) => c.effort === "capped")
       .map((c) => c.unit.label);
-    expect(capped).toEqual(["cx-18", "ki-16", "ag-u5", "ag-p22", "ag-p23", "ag-p24", "cx-19"]);
+    expect(capped).toEqual([
+      "openai-codex:plus#1",
+      "kiro",
+      "google-antigravity:ultra#1",
+      "google-antigravity:pro#1",
+      "google-antigravity:pro#2",
+      "google-antigravity:pro#3",
+      "openai-codex:pro#1",
+    ]);
   });
 
-  test("task lists differ by period", () => {
-    expect(order("task", PERIOD.PEAK)[0]).toBe("cc-17 commandcode/minimax/minimax-m3.1-flash:free");
+  test("task lists differ by period; an entry without a tier takes every account", () => {
+    expect(order("task", PERIOD.PEAK).slice(0, 5)).toEqual([
+      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
+      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
+      "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
+      "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
+      "google-antigravity:pro#3 google-antigravity/gemini-3.8-flash",
+    ]);
     expect(order("task", PERIOD.OFF_PEAK).slice(0, 2)).toEqual([
-      "cc-17 commandcode/minimax/minimax-m3.1-flash:free",
-      "ct-yml ctyun/deepseek-v4-pro-0813-oc",
+      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
+      "ctyun ctyun/deepseek-v4-pro-0813-oc",
     ]);
   });
 
   test("vision derives from task and requires image input", () => {
-    const { candidates, require } = policy.candidates("vision", PERIOD.PEAK);
+    const { candidates, require } = policy.candidates("vision", PERIOD.PEAK, units);
     expect(require).toEqual(["text", "image"]);
-    expect(candidates).toEqual(policy.candidates("task", PERIOD.PEAK).candidates);
-  });
-
-  test("pinned units carry their credential id; single-key units do not", () => {
-    const units = Object.fromEntries(
-      policy.candidates("default", PERIOD.OFF_PEAK).candidates.map((c) => [c.unit.label, c.unit]),
-    );
-    expect(units["ag-p23"].credentialId).toBe(23);
-    expect(units["cx-19"].credentialId).toBe(19);
-    expect(units["ki-16"].credentialId).toBeUndefined();
+    expect(candidates).toEqual(policy.candidates("task", PERIOD.PEAK, units).candidates);
   });
 
   test("routeFor accepts only lazy models with a table", () => {
@@ -71,23 +111,64 @@ describe("bundled route tables", () => {
   });
 });
 
+describe("runtime expansion", () => {
+  test("a newly added account joins its tier without any table change", () => {
+    const more = [...ACCOUNTS, { id: 17, provider: "openai-codex", tier: "plus" }];
+    const codex = order("default", PERIOD.PEAK, new UnitDirectory({ tiers: tierSource(more, 2) })).filter((line) =>
+      line.startsWith("openai-codex"),
+    );
+    expect(codex).toEqual([
+      "openai-codex:plus#1 openai-codex/gpt-6.1-sol",
+      "openai-codex:plus#2 openai-codex/gpt-6.1-sol",
+      "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
+    ]);
+  });
+
+  test("an account with an unknown tier is matched only by entries without a tier", () => {
+    const unknown = ACCOUNTS.map((a) => (a.id === 9 ? { id: 9, provider: a.provider } : a));
+    const directory = new UnitDirectory({ tiers: tierSource(unknown) });
+    expect(order("default", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-4"))).not.toContain(
+      "google-antigravity#1 google-antigravity/gemini-4-argon",
+    );
+    expect(order("task", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-3.8"))).toEqual([
+      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
+      "google-antigravity#1 google-antigravity/gemini-3.8-flash",
+      "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
+      "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
+    ]);
+  });
+
+  test("expansions are cached per unit version", () => {
+    const tiers = tierSource(ACCOUNTS);
+    const directory = new UnitDirectory({ tiers });
+    const first = policy.candidates("default", PERIOD.PEAK, directory).candidates;
+    expect(policy.candidates("default", PERIOD.PEAK, directory).candidates).toBe(first);
+    tiers.version = 2;
+    tiers.accounts = () => ACCOUNTS.filter((a) => a.id !== 5);
+    const next = order("default", PERIOD.PEAK, directory);
+    expect(next[0]).toBe("kiro kiro/claude-opus-5-5");
+  });
+});
+
 describe("validation", () => {
-  const base = () => ({
-    units: { a: { provider: "p" }, b: { provider: "q" } },
-    routes: { r: { periods: { peak: [{ units: ["a"], model: "p/m" }] } } },
-  });
+  const base = () => ({ routes: { r: { periods: { peak: [{ model: "p/m" }] } } } });
 
-  test("a unit must belong to the model's provider", () => {
+  test("entries that name accounts are rejected", () => {
     const data = base();
-    data.routes.r.periods.peak[0].units = ["b"];
-    expect(() => new RoutePolicy(data)).toThrow(/cannot serve/);
+    data.routes.r.periods.peak[0].units = ["a"];
+    expect(() => new RoutePolicy(data)).toThrow(/select them by "tier"/);
   });
 
-  test("unknown units and sameAs cycles are rejected at load time", () => {
-    const unknown = base();
-    unknown.routes.r.periods.peak[0].units = ["zz"];
-    expect(() => new RoutePolicy(unknown)).toThrow(/unknown unit/);
+  test("models must be provider-qualified and tiers non-empty", () => {
+    const bare = base();
+    bare.routes.r.periods.peak[0].model = "m";
+    expect(() => new RoutePolicy(bare)).toThrow(/provider\/model/);
+    const empty = base();
+    empty.routes.r.periods.peak[0].tier = [];
+    expect(() => new RoutePolicy(empty)).toThrow(/tier/);
+  });
 
+  test("sameAs cycles are rejected at load time", () => {
     const cycle = base();
     cycle.routes.r.periods = { peak: [{ sameAs: "offPeak" }], offPeak: [{ sameAs: "peak" }] };
     expect(() => new RoutePolicy(cycle)).toThrow(/cycle/);

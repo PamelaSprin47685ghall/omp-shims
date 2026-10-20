@@ -43,7 +43,7 @@ on every machine.
 | `copilot-auto` | on | Negotiates GitHub Copilot `auto` routing and injects the required `Copilot-Session-Token` for gated models. |
 | `kiro-credential-sync` | on | Copies kiro-cli's rotated token into the auth-broker credential store so its refresh sweep stops failing. Started by the services only. |
 | `traffic-log` | **off** | Logs every inbound gateway request to hourly-rolling files (secrets in headers are redacted). |
-| `lazy-router` | **off** | Adds `lazy/default`, `lazy/task` and `lazy/vision`: virtual models that pick the first healthy (provider, credential) unit from a peak-aware route table (see [below](#lazy-router)). |
+| `lazy-router` | **off** | Adds `lazy/default`, `lazy/task` and `lazy/vision`: virtual models that pick the first healthy (provider, account) unit from a peak-aware route table selected by account tier (see [below](#lazy-router)). |
 | `native-loop-guard` | **off** | OMP's own thinking-loop guard. Off by default, because it aborts and retries the identical body; nothing here compensates loops. |
 
 `plugin-bridge` supplies credentials in memory only. Two features do write to
@@ -192,6 +192,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | `vendor-shims` | `pluginsDir` | `OMP_SHIMS_VENDOR_SKIP=1` skips it | `~/.omp/plugins` |
 | `lazy-router` | `routesFile`, `holidaysFile` | | bundled `lib/lazy-router/*.json` |
 | | `probeIntervalMs`, `probeTimeoutMs` | | `1800000`, `90000` |
+| | `tierRefreshMs`, `tierRecheckMs` | | `21600000`, `60000` |
 | | `headerTimeoutMs`, `providerHeaderTimeoutMs` | | `300000`, `{ "commandcode": 1800000 }` |
 | | `statusPath` | | `/v1/lazy/status` |
 | | `codexHttpTransport` (sets `PI_CODEX_WEBSOCKET=0`) | | `true` |
@@ -252,8 +253,27 @@ no `proAccounts`, every account that is not an Ultra account counts as Pro.
 `lazy-router` publishes three virtual models in `/v1/models` (500k context, 64k
 output; only `lazy/vision` accepts images). A request for one of them is routed to
 the first healthy *unit* in its route table, where a unit is one provider plus one
-credential. Units with a `credentialId` are pinned to that `agent.db` credential;
-the others use the gateway's own credential.
+account.
+
+- **Accounts by tier**: route entries name a model and, optionally, the account
+  tiers they want (`"tier": "plus"`, `"tier": ["ultra", "pro"]`); they never name
+  accounts. At runtime an entry expands into one unit per enabled `agent.db`
+  account of that provider and tier: tiers in the order listed, accounts oldest
+  first (ascending credential id = creation order). An entry without `tier` takes
+  every account of the provider. New or removed logins are picked up within a
+  minute, without a config change.
+- **Tier detection**: OpenAI Codex reads the ChatGPT plan claim of the OAuth
+  token; Google Antigravity asks Cloud Code Assist for the account's paid tier
+  (re-checked every `tierRefreshMs`). Other providers have no tiers. An account
+  whose tier cannot be read is matched only by entries without `tier`, and is
+  logged once.
+- **Pinning**: a provider with two or more accounts gets one unit per account,
+  each pinned to its credential. A provider with one account, or none in
+  `agent.db` (for example a key in `models.yml`), is a single unit served by the
+  gateway's own credential.
+- **Labels**: units are named `provider:tier#n` (`openai-codex:plus#1`,
+  `google-antigravity:pro#2`), `provider#n` without a tier, or just `provider`
+  for a single unit; `n` counts accounts of that provider and tier, oldest first.
 
 - **Peak hours**: route tables differ between peak (Beijing time, Mon to Fri,
   09:00-12:00 and 14:00-18:00 on working days) and off-peak. Weekends, public
@@ -271,14 +291,18 @@ the others use the gateway's own credential.
   unit that recovers takes its traffic back.
 - **Observability**: the response carries `x-lazy-router-unit` and
   `x-lazy-router-model`; structured events go to stderr (and to `out` as JSONL);
-  `GET /v1/lazy/status` (gateway token required) shows the clock, health and routes.
+  `GET /v1/lazy/status` shows the current period, the units and, per route, each
+  candidate's health, cooldown reason (status code only) and next probe time.
+  It is the one path served without the gateway token, so it holds no account
+  ids, e-mails, keys or upstream error text.
 
 ```json
 { "features": { "lazy-router": { "enabled": true } } }
 ```
 
-The bundled `routes.json` names this deployment's units; point `routesFile` at
-your own copy to change them. While the router is on, OpenAI Codex uses HTTP/SSE
+Point `routesFile` at your own copy of `routes.json` to change the tables. The
+router runs only in the `auth-gateway` process (shims.json is shared with the
+broker and interactive sessions). While it is on, OpenAI Codex uses HTTP/SSE
 instead of its pooled WebSocket so the credential pin applies
 (`codexHttpTransport: false` opts out).
 

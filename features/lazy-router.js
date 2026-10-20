@@ -4,6 +4,7 @@
 //
 // Wiring only; the parts live in lib/lazy-router/:
 //   routes.json / policy.js      declarative route tables → candidate lists
+//   tiers.js / units.js          account tiers at runtime → labelled (provider, account) units
 //   holidays-cn.json / calendar.js   Beijing-time peak detection
 //   catalog.js                   model traits from the gateway's ModelRegistry
 //   effort.js                    effort capping and fitting
@@ -19,6 +20,8 @@
 //     "routesFile": null,            // replace the bundled routes.json
 //     "holidaysFile": null,          // replace the bundled holidays-cn.json
 //     "probeIntervalMs": 1800000,    // background probe cadence for cooling units
+//     "tierRefreshMs": 21600000,     // re-read a known account tier this often
+//     "tierRecheckMs": 60000,        // look for new/removed accounts this often
 //     "headerTimeoutMs": 300000,     // max wait for the provider's first headers
 //     "providerHeaderTimeoutMs": { "commandcode": 1800000 },
 //     "upstreamHosts": {},           // provider → host, when it differs from the model baseUrl
@@ -33,7 +36,7 @@ import { readBody, wrapServe } from "../lib/inbound.js";
 import { createAttemptLayer } from "../lib/lazy-router/attempt.js";
 import { HolidayCalendar, loadHolidayData, PeakSchedule } from "../lib/lazy-router/calendar.js";
 import { ModelCatalog } from "../lib/lazy-router/catalog.js";
-import { CredentialStore, readTrimmed } from "../lib/lazy-router/credentials.js";
+import { CredentialStore } from "../lib/lazy-router/credentials.js";
 import { GatewayDispatcher } from "../lib/lazy-router/dispatcher.js";
 import { createEventLog, summarizeUpstreamBody } from "../lib/lazy-router/events.js";
 import { FaultInjector } from "../lib/lazy-router/faults.js";
@@ -41,6 +44,8 @@ import { formatForPath } from "../lib/lazy-router/formats.js";
 import { HealthRegistry } from "../lib/lazy-router/health.js";
 import { loadPolicyData, RoutePolicy } from "../lib/lazy-router/policy.js";
 import { LazyRouter } from "../lib/lazy-router/router.js";
+import { TierDirectory } from "../lib/lazy-router/tiers.js";
+import { UnitDirectory } from "../lib/lazy-router/units.js";
 
 const MODELS_PATH = "/v1/models";
 const DEFAULT_BROKER_URL = "http://127.0.0.1:8765";
@@ -73,14 +78,26 @@ export function createLazyRouter(config, { log = report } = {}) {
     brokerUrl: process.env.OMP_AUTH_BROKER_URL ?? DEFAULT_BROKER_URL,
     brokerTokenPath: config.brokerTokenPath ?? join(ompDir, "auth-broker.token"),
   });
+  const tiers = new TierDirectory({
+    credentials,
+    emit,
+    ...(config.tierRefreshMs ? { refreshMs: config.tierRefreshMs } : {}),
+    ...(config.tierRecheckMs ? { recheckMs: config.tierRecheckMs } : {}),
+  });
+  const units = new UnitDirectory({ tiers });
   const catalog = new ModelCatalog({ overrides: policy.modelTraits });
-  const health = new HealthRegistry({ probeIntervalMs: config.probeIntervalMs, onEvent: emit });
+  const health = new HealthRegistry({
+    probeIntervalMs: config.probeIntervalMs,
+    onEvent: emit,
+    describe: (key, candidate) => (candidate ? `${candidate.unit.label} ${candidate.model}` : key),
+  });
   const dispatcher = new GatewayDispatcher({ tokenPath, headerTimeoutMs: config.headerTimeoutMs });
   const faults = new FaultInjector(config.testFaults ?? {});
   if (faults.active) log("lazy-router: TEST FAULTS ACTIVE — never use this config in production", config.testFaults);
 
   const router = new LazyRouter({
     policy,
+    units,
     schedule,
     catalog,
     health,
@@ -94,7 +111,6 @@ export function createLazyRouter(config, { log = report } = {}) {
       headerTimeoutMs: config.headerTimeoutMs,
       providerHeaderTimeoutMs: config.providerHeaderTimeoutMs ?? {},
       upstreamHosts: config.upstreamHosts ?? {},
-      gatewayToken: () => readTrimmed(tokenPath),
     },
   });
 
@@ -104,17 +120,22 @@ export function createLazyRouter(config, { log = report } = {}) {
       ? (attempt, url, body) =>
           emit("upstream-request", {
             unit: attempt.unit.label,
-            ...(attempt.credentialId === undefined ? {} : { pinnedCredential: attempt.credentialId }),
+            pinned: attempt.credentialId !== undefined,
             host: new URL(url).host,
             fields: summarizeUpstreamBody(body) ?? "<non-JSON body>",
           })
       : undefined,
   });
 
-  return { router, dispatcher, catalog, attemptLayer };
+  return { router, dispatcher, catalog, tiers, attemptLayer };
 }
 
-/** The inbound handler: lazy models, the status view and /v1/models; everything else passes through. */
+/**
+ * The inbound handler: lazy models, the status view and /v1/models; everything
+ * else passes through. The status view is the one path answered without the
+ * gateway token (it holds nothing account-identifying); /v1/models and lazy
+ * requests still go through the gateway's own authentication.
+ */
 export function lazyRouterHandler(handler, { router, dispatcher, statusPath }) {
   return async function lazyRouterInbound(request, server) {
     dispatcher.bind(handler, server);
@@ -122,7 +143,7 @@ export function lazyRouterHandler(handler, { router, dispatcher, statusPath }) {
 
     if (request.method === "GET") {
       if (pathname === MODELS_PATH) return withLazyModels(await handler(request, server), router.advertisedModels());
-      if (pathname === statusPath) return router.status(request);
+      if (pathname === statusPath) return router.status();
       return handler(request, server);
     }
 
@@ -156,15 +177,32 @@ function preferCodexHttp(config) {
   }
 }
 
+/** The subcommand that serves the gateway; the router belongs in that process only. */
+const GATEWAY_COMMAND = "auth-gateway";
+
+/**
+ * True in the auth-gateway process. shims.json is shared with the auth-broker
+ * and interactive sessions, which must not answer lazy models, publish the
+ * status path, switch Codex transport or look up account tiers.
+ */
+export function isGatewayProcess(argv = process.argv) {
+  return argv.includes(GATEWAY_COMMAND);
+}
+
 export function install(config, context) {
   if (config?.enabled === false) return;
+  if (!isGatewayProcess()) {
+    context.log?.("lazy-router: not the auth-gateway process; staying off");
+    return;
+  }
   preferCodexHttp(config);
-  const { router, dispatcher, catalog, attemptLayer } = createLazyRouter(config);
+  const { router, dispatcher, catalog, tiers, attemptLayer } = createLazyRouter(config);
 
   if (!catalog.observe(globalThis.__OMP_SHIMS_HOST__)) {
     report("lazy-router: host capture unavailable (is registry-capture.js preloaded first?); routes will be empty");
   }
   context.addFetchHandler(attemptLayer);
+  tiers.start();
   wrapServe((handler) => lazyRouterHandler(handler, { router, dispatcher, statusPath: config.statusPath }));
   context.log?.("lazy-router: enabled", { routes: router.policy.routeNames });
 }

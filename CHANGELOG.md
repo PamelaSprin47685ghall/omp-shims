@@ -13,6 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   peak-aware route table, with explicit effort and `max_tokens`, probe-based
   cooldown and failover, background recovery probes, and `GET /v1/lazy/status`.
   Off by default.
+- `lazy-router`: route entries select accounts by tier (`plus`, `pro`, `ultra`, ...)
+  instead of naming credentials. Tiers are read at runtime (Codex plan claim,
+  Antigravity paid tier) and new logins join their tier without a config change.
+  Units are labelled `provider:tier#n`.
+- `lazy-router`: `GET /v1/lazy/status` is public and shows only unit labels,
+  models, health, sanitized cooldown reasons and next probe times.
 - `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - `models-bridge`: expose custom providers and models declared in `models.yml` to the
   auth-gateway reverse proxy, supplying credentials in memory and making them routable.
