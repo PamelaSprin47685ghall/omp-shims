@@ -1,10 +1,49 @@
 import { describe, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { lazyRouterHandler } from "../features/lazy-router.js";
-import { escapeHtml, renderStatusPage } from "../lib/lazy-router/status-page.js";
+import { describeStatus, relative } from "../lib/lazy-router/status-page/view.js";
+import { ASSET_PREFIX, CONTENT_SECURITY_POLICY, escapeHtml, renderStatusPage } from "../lib/lazy-router/status-page.js";
 
 const STATUS_PATH = "/v1/lazy/status";
 const EMAIL = /[\w.+-]+@[\w-]+\.[\w.]+/;
+const NOW = Date.parse("2026-10-20T12:00:00Z");
+
+/** A status document shaped like the router's, with one cooling unit and a not-applicable one. */
+const STATUS = {
+  now: "2026-10-20T12:00:00.000Z",
+  period: "offPeak",
+  clock: { period: "offPeak", localTime: "2026-10-20 20:00", dayKind: "workday", calendarStatus: "official" },
+  nextSwitch: { at: "2026-10-21T01:00:00.000Z", period: "peak" },
+  catalogReady: true,
+  routes: {
+    default: [
+      {
+        unit: "p:gold#1",
+        model: "p/big",
+        effortPolicy: "capped",
+        eligible: true,
+        health: "cooling",
+        coolingSince: "2026-10-20T11:59:00.000Z",
+        reason: "upstream 429 Too Many Requests",
+        nextProbeAt: "2026-10-20T12:29:00.000Z",
+      },
+      { unit: "p:gold#2", model: "p/big", effortPolicy: "capped", eligible: true, health: "alive" },
+    ],
+    vision: [
+      { unit: "q", model: "q/text", effortPolicy: "high", eligible: false, health: "alive" },
+      { unit: "p:gold#2", model: "p/big", effortPolicy: "high", eligible: true, health: "alive" },
+    ],
+  },
+  alternate: {
+    period: "peak",
+    routes: {
+      default: [],
+      vision: [
+        { unit: "q", model: "q/text", effortPolicy: "high", eligible: false, health: "alive" },
+        { unit: "p:gold#1", model: "p/big", effortPolicy: "high", eligible: true, health: "alive" },
+      ],
+    },
+  },
+};
 
 /** The router's inbound handler over a gateway that demands a token everywhere. */
 function inbound() {
@@ -14,7 +53,8 @@ function inbound() {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   };
   const router = {
-    status: () => Response.json({ period: "offPeak", routes: {} }),
+    status: () => Response.json(STATUS),
+    statusView: () => STATUS,
     advertisedModels: () => [],
     handles: () => false,
   };
@@ -23,76 +63,122 @@ function inbound() {
   return { send, gatewayCalls };
 }
 
-describe("status page at /", () => {
-  test("GET / serves the HTML page without a token", async () => {
+describe("public paths", () => {
+  test("GET / serves the server-rendered page without a token", async () => {
     const { send, gatewayCalls } = inbound();
     const response = await send("GET", "/", { accept: "text/html" });
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(response.headers.get("content-security-policy")).toBe(CONTENT_SECURITY_POLICY);
     const html = await response.text();
     expect(html).toStartWith("<!doctype html>");
-    expect(html).toContain(`content="${STATUS_PATH}"`);
+    // The state is in the HTML itself, not only after JavaScript runs.
+    expect(html).toContain("p:gold#2");
+    expect(html).toContain("upstream 429 Too Many Requests");
     expect(gatewayCalls).toEqual([]);
   });
 
-  test("HEAD / answers the same headers with no body", async () => {
-    const response = await inbound().send("HEAD", "/");
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(await response.text()).toBe("");
+  test("HEAD / and the page's own assets are public; assets carry their types", async () => {
+    const { send } = inbound();
+    const head = await send("HEAD", "/");
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    for (const [name, type] of [
+      ["style.css", "text/css"],
+      ["client.js", "text/javascript"],
+      ["view.js", "text/javascript"],
+      ["labels.js", "text/javascript"],
+    ]) {
+      const response = await send("GET", `${ASSET_PREFIX}/${name}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toStartWith(type);
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    }
   });
 
   test("the status JSON stays JSON whatever the client accepts", async () => {
     const response = await inbound().send("GET", STATUS_PATH, { accept: "text/html" });
     expect(response.headers.get("content-type")).toContain("application/json");
-    expect((await response.json()).period).toBe("offPeak");
   });
 
   test("everything else still goes through the gateway's authentication", async () => {
     const { send, gatewayCalls } = inbound();
-    for (const [method, path] of [
+    const others = [
       ["POST", "/"],
       ["GET", "/v1/models"],
       ["GET", "/index.html"],
+      ["GET", `${ASSET_PREFIX}/../../v1/models`],
+      ["GET", `${ASSET_PREFIX}/secret.js`],
+      ["POST", `${ASSET_PREFIX}/client.js`],
       ["GET", `${STATUS_PATH}/x`],
-    ]) {
-      expect((await send(method, path)).status).toBe(401);
-    }
-    expect(gatewayCalls).toEqual(["POST /", "GET /v1/models", "GET /index.html", `GET ${STATUS_PATH}/x`]);
+    ];
+    for (const [method, path] of others) expect((await send(method, path)).status).toBe(401);
+    expect(gatewayCalls).toHaveLength(others.length);
+  });
+});
+
+describe("display model", () => {
+  test("not-applicable units are hidden and numbering stays contiguous", () => {
+    const view = describeStatus(STATUS);
+    const vision = view.routes.find((route) => route.title.endsWith("lazy/vision"));
+    expect(vision.rows.map((row) => [row.n, row.unit])).toEqual([["1", "p:gold#2"]]);
+    expect(vision.other.items).toEqual(["p:gold#1 · p/big"]);
+    expect(vision.other.summary).toBe("高峰时段顺序（1 个单元）");
+  });
+
+  test("the first alive unit is the active one", () => {
+    const [main] = describeStatus(STATUS).routes;
+    expect(main.rows.map((row) => [row.unit, row.active, row.health.text])).toEqual([
+      ["p:gold#1", false, "冷却中"],
+      ["p:gold#2", true, "可用"],
+    ]);
+    expect(main.sub).toBe("当前由 p:gold#2 服务");
+  });
+
+  test("while the catalog is unknown every unit shows, marked 未知, none active", () => {
+    const [main] = describeStatus({ ...STATUS, catalogReady: false }).routes;
+    expect(main.rows.every((row) => row.health.text === "未知" && !row.active)).toBe(true);
+  });
+
+  test("relative times read naturally", () => {
+    expect(relative("2026-10-20T12:29:00.000Z", NOW)).toBe("29 分 0 秒后");
+    expect(relative("2026-10-20T11:59:00.000Z", NOW)).toBe("1 分 0 秒前");
+    expect(relative(null, NOW)).toBe("—");
   });
 });
 
 describe("page content", () => {
-  const { html, headers } = renderStatusPage({ statusPath: STATUS_PATH });
+  const html = renderStatusPage(STATUS, { statusPath: STATUS_PATH, nowMs: NOW });
 
-  test("holds no account data and loads nothing external", () => {
+  test("renders contiguous rows without the not-applicable unit", () => {
+    const vision = html.slice(html.indexOf("lazy/vision"));
+    expect(vision).not.toContain(">q<");
+    expect(html).toContain("29 分 0 秒后");
+  });
+
+  test("holds no account data, no inline code and nothing external", () => {
     expect(html).not.toMatch(EMAIL);
     expect(html).not.toContain("credentialId");
     expect(html).not.toMatch(/https?:\/\//);
-    expect(html).not.toMatch(/<(script|link|img)[^>]+(src|href)=/);
+    expect(html).not.toMatch(/<script>|<style>|\sstyle=|\son\w+=/);
+    expect(CONTENT_SECURITY_POLICY).not.toContain("unsafe");
   });
 
-  test("renders data through textContent only", () => {
-    expect(html).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
-    expect(html).toContain("textContent");
+  test("escapes every server-side value", () => {
+    const hostile = `"><script>alert(1)</script>`;
+    const page = renderStatusPage(
+      { ...STATUS, routes: { default: [{ ...STATUS.routes.default[1], unit: hostile, model: hostile }] } },
+      { statusPath: hostile, nowMs: NOW },
+    );
+    expect(page).not.toContain("<script>alert(1)");
+    expect(page).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(escapeHtml(`&'`)).toBe("&amp;&#39;");
   });
 
-  test("the CSP allows exactly the page's own inline style and script", () => {
-    const hashOf = (kind) => {
-      const content = html.match(new RegExp(`<${kind}>([\\s\\S]*?)</${kind}>`))[1];
-      return `'sha256-${createHash("sha256").update(content).digest("base64")}'`;
-    };
-    const policy = headers["content-security-policy"];
-    expect(policy).toContain(`script-src ${hashOf("script")}`);
-    expect(policy).toContain(`style-src ${hashOf("style")}`);
-    expect(policy).toContain("connect-src 'self'");
-    expect(policy).not.toContain("unsafe-inline");
-  });
-
-  test("the server-side value is escaped", () => {
-    expect(escapeHtml(`"><script>x</script>&'`)).toBe("&quot;&gt;&lt;script&gt;x&lt;/script&gt;&amp;&#39;");
-    const hostile = renderStatusPage({ statusPath: `"><script>alert(1)</script>` }).html;
-    expect(hostile).not.toContain("<script>alert(1)");
+  test("the browser script assigns data with textContent only", async () => {
+    for (const name of ["client.js", "view.js"]) {
+      const source = await Bun.file(new URL(`../lib/lazy-router/status-page/${name}`, import.meta.url)).text();
+      expect(source).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
+    }
   });
 });

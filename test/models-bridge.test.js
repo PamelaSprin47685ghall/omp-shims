@@ -246,6 +246,52 @@ providers:
     expect(snap.credentials.some((c) => c.provider === "built-in")).toBe(true);
   });
 
+  test("getAll registers once per registry; refresh re-registers; the sync hook is not stacked", async () => {
+    const modelsFile = join(dir, "models-once.yml");
+    writeFileSync(
+      modelsFile,
+      "providers:\n  once-proxy:\n    baseUrl: https://once.example/v1\n    apiKey: k\n    api: openai-completions\n    models:\n      - id: m1\n",
+    );
+    const registered = [];
+    let syncWraps = 0;
+    class FakeModelRegistry {
+      constructor() {
+        let sync = (enabled) => enabled;
+        // Count every time a layer replaces syncExtensionSources.
+        Object.defineProperty(this, "syncExtensionSources", {
+          get: () => sync,
+          set: (next) => {
+            syncWraps++;
+            sync = next;
+          },
+        });
+      }
+      registerProvider(name) {
+        registered.push(name);
+      }
+      async refresh() {
+        return "refreshed";
+      }
+      getAll() {
+        return [];
+      }
+    }
+    globalThis.__OMP_SHIMS_HOST__ = {
+      captured: new Map([["ModelRegistry", FakeModelRegistry]]),
+      observe: () => {},
+    };
+    install({ modelsPath: modelsFile }, { log: () => {} });
+
+    const registry = new FakeModelRegistry();
+    for (let i = 0; i < 100; i++) registry.getAll();
+    expect(registered).toEqual(["once-proxy"]);
+    await registry.refresh();
+    await registry.refresh();
+    expect(registered).toEqual(["once-proxy", "once-proxy", "once-proxy"]);
+    expect(syncWraps).toBe(1);
+    expect([...registry.syncExtensionSources(new Set(["x"]))].sort()).toEqual(["omp-shims:models-bridge", "x"]);
+  });
+
   test("handles missing models.yml gracefully without throwing", async () => {
     class FakeModelRegistry {
       async refresh() {

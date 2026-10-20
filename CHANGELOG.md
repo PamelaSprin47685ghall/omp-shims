@@ -19,8 +19,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Units are labelled `provider:tier#n`.
 - `lazy-router`: `GET /v1/lazy/status` is public and shows only unit labels,
   models, health, sanitized cooldown reasons and next probe times.
-- `lazy-router`: a status page at `GET /` (public, self-contained, auto-refreshing),
-  and `nextSwitch` / `alternate` (the other period's order) in the status JSON.
+- `lazy-router`: a status page at `GET /` (public, server-rendered, auto-refreshing,
+  same-origin assets under `/assets/lazy-status/`), and `nextSwitch` / `alternate`
+  (the other period's order) in the status JSON, which lists only units that can
+  serve each route.
 - `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - `models-bridge`: expose custom providers and models declared in `models.yml` to the
   auth-gateway reverse proxy, supplying credentials in memory and making them routable.
@@ -41,6 +43,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `antigravity-account-routing.ultraAccounts` / `proAccounts`).
 
 ### Fixed
+
+- `models-bridge`: `ModelRegistry.getAll()` no longer re-reads models.yml,
+  re-registers every provider and stacks another `syncExtensionSources` wrapper on
+  each call. A registry is populated once and again after each `refresh()`. Under
+  frequent lookups the stacked wrappers made the gateway spin at 100% CPU.
+- `lazy-router`: model lookups share one registry listing per 5 seconds.
 
 - Generated systemd units now contain a live `BUN_OPTIONS` preload line; it was
   printed commented out, so units installed as-is ran without the shims.

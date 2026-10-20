@@ -174,3 +174,26 @@ describe("validation", () => {
     expect(() => new RoutePolicy(cycle)).toThrow(/cycle/);
   });
 });
+
+describe("model catalog", () => {
+  test("one registry listing serves every lookup within the snapshot TTL", async () => {
+    const { ModelCatalog, CATALOG_SNAPSHOT_TTL_MS } = await import("../lib/lazy-router/catalog.js");
+    let clock = 0;
+    let listings = 0;
+    const registry = {
+      getAll: () => {
+        listings++;
+        return [{ provider: "p", id: "m", contextWindow: 1, input: ["text"] }];
+      },
+    };
+    const catalog = new ModelCatalog({ now: () => clock });
+    catalog.attach(registry);
+    for (let i = 0; i < 200; i++) catalog.find(i % 2 ? "p/m" : "p/missing");
+    expect(listings).toBe(1);
+    expect(catalog.find("p/m")).toBeDefined();
+    expect(catalog.find("p/missing")).toBeUndefined();
+    clock = CATALOG_SNAPSHOT_TTL_MS;
+    catalog.find("p/m");
+    expect(listings).toBe(2);
+  });
+});

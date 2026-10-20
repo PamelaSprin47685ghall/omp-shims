@@ -309,11 +309,12 @@ describe("LazyRouter", () => {
     expect(view.period).toBe("peak");
     expect(view.alternate).toEqual({ period: "offPeak", routes: { default: [], vision: [] } });
     expect(view.nextSwitch).toBeNull();
+    // q cannot take images, so it is not part of lazy/vision at all.
     expect(view.routes.vision.map((c) => [c.unit, c.eligible])).toEqual([
       ["p:gold#1", true],
       ["p:gold#2", true],
-      ["q", false],
     ]);
+    expect(view.routes.default.map((c) => c.unit)).toEqual(["p:gold#1", "p:gold#2", "q"]);
     const cooling = view.routes.default[0];
     expect(cooling).toMatchObject({ unit: "p:gold#1", health: "cooling", reason: "upstream 429 Too Many Requests" });
     expect(typeof cooling.nextProbeAt).toBe("string");

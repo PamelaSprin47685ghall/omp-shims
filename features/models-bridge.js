@@ -43,8 +43,7 @@ export function findModelsPath(configuredPath) {
     return existsSync(configuredPath) ? configuredPath : null;
   }
 
-  const envPath =
-    process.env.OMP_SHIMS_MODELS_PATH ?? process.env.OMP_MODELS_PATH ?? process.env.PI_MODELS_PATH;
+  const envPath = process.env.OMP_SHIMS_MODELS_PATH ?? process.env.OMP_MODELS_PATH ?? process.env.PI_MODELS_PATH;
   if (envPath) {
     return existsSync(envPath) ? envPath : null;
   }
@@ -169,6 +168,10 @@ export function install(config, context) {
 
   const registeredProviders = new Set();
   const tokens = new Map();
+  /** Registries that already hold the custom providers. */
+  const populated = new WeakSet();
+  /** Registries whose syncExtensionSources already keeps our source. */
+  const syncHooked = new WeakSet();
   let running = false;
 
   function registerInto(registry) {
@@ -210,8 +213,10 @@ export function install(config, context) {
       }
 
       // Preserve registered provider source so syncExtensionSources doesn't drop it
+      // Once per registry: every wrap adds a layer every later call walks through.
       const sync = registry.syncExtensionSources?.bind(registry);
-      if (typeof sync === "function" && sources.size > 0) {
+      if (typeof sync === "function" && sources.size > 0 && !syncHooked.has(registry)) {
+        syncHooked.add(registry);
         registry.syncExtensionSources = (enabled) => {
           const merged = enabled instanceof Set ? new Set(enabled) : new Set(enabled ?? []);
           for (const source of sources) merged.add(source);
@@ -237,7 +242,7 @@ export function install(config, context) {
       if (credentials && typeof credentials.snapshot === "function" && !credentials.__modelsBridgeHooked) {
         credentials.__modelsBridgeHooked = true;
         const origSnapshot = credentials.snapshot.bind(credentials);
-        credentials.snapshot = function (...args) {
+        credentials.snapshot = (...args) => {
           const snap = origSnapshot(...args);
           if (!snap || !Array.isArray(snap.credentials)) return snap;
           const existing = new Set(snap.credentials.map((c) => c.provider));
@@ -261,6 +266,9 @@ export function install(config, context) {
         log(`models-bridge: hooked authStorage.credentials.snapshot for ${registeredProviders.size} providers`);
       }
     } finally {
+      // Also when models.yml is missing or empty: getAll stays cheap, and a
+      // file added later is picked up on the next refresh().
+      populated.add(registry);
       running = false;
     }
   }
@@ -277,7 +285,9 @@ export function install(config, context) {
       if (typeof original !== "function") continue;
       proto[method] = function (...args) {
         if (method === "getAll") {
-          registerInto(this);
+          // getAll is a hot read path (called per lookup): populate a registry
+          // once; refresh(), which may rebuild the provider list, re-registers.
+          if (!populated.has(this)) registerInto(this);
           return original.apply(this, args);
         }
         return Promise.resolve(original.apply(this, args)).then((res) => {

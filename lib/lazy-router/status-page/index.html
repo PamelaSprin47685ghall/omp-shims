@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="lazy-status-path" content="{{statusPath}}">
+<title>Lazy Router · 状态</title>
+<link rel="stylesheet" href="{{assets}}/style.css">
+<script type="module" src="{{assets}}/client.js"></script>
+</head>
+<body>
+<main>
+<header>
+<h1>Lazy Router 状态</h1>
+<span id="period" class="pill {{periodKey}}">{{period}}</span>
+<div class="facts">
+<span>北京时间 <b id="local">{{local}}</b></span>
+<span>日期 <b id="day">{{day}}</b></span>
+<span>下次切换 <b id="next" data-until="{{nextAt}}" data-suffix="{{nextSuffix}}">{{next}}</b></span>
+<span>节假日表 <b id="calendar">{{calendar}}</b></span>
+</div>
+</header>
+<div id="banner" class="banner" hidden></div>
+<section id="routes">{{routes}}</section>
+<footer><span id="live">页面生成于服务器；启用 JavaScript 后自动刷新</span> · 上次更新 <span id="updated" data-since="{{updatedAt}}">刚刚</span></footer>
+</main>
+<template id="route-card">
+<div class="card">
+<h2><span class="title">路由</span><small class="sub"></small></h2>
+<div class="scroll"><table>
+<thead><tr><th>#</th><th>单元</th><th>模型</th><th>推理强度</th><th>状态</th><th>冷却原因</th><th>冷却开始</th><th>下次探测</th></tr></thead>
+<tbody></tbody>
+</table></div>
+<details><summary></summary><ol></ol></details>
+</div>
+</template>
+</body>
+</html>

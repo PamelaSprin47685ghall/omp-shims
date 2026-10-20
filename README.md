@@ -295,11 +295,14 @@ account.
   candidate's health, cooldown reason (status code only) and next probe time.
   It holds no account ids, e-mails, keys or upstream error text, so it is served
   without the gateway token.
-- **Status page**: `GET /` serves a self-contained page (light/dark, no external
-  assets, strict CSP) that renders the status JSON every 10 seconds: the current
-  period and next switch, and per route the ordered units with the serving one
-  highlighted, health, cooldown reason and probe countdown. The status JSON and
-  `GET`/`HEAD /` are the only paths answered without the gateway token.
+- **Status page**: `GET /` serves a page rendered on the server from the status
+  data (so it shows the full state even without JavaScript), light/dark, with a
+  strict same-origin CSP. Its stylesheet and script live under
+  `/assets/lazy-status/`; the script refreshes the view from the status JSON every
+  10 seconds. It shows the current period and next switch, and per route the
+  units that can serve it, in order, with the serving one highlighted, health,
+  cooldown reason and probe countdown. The page, its assets and the status JSON
+  are the only paths answered without the gateway token.
 
 ```json
 { "features": { "lazy-router": { "enabled": true } } }
