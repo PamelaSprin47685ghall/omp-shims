@@ -23,17 +23,18 @@ describe("cline-pin-upstream", () => {
     expect(body.providerOptions.gateway.only).toEqual(["deepseek"]);
   });
 
-  test("supports providerOptions.gateway.order routing for glm-5.3-flash", async () => {
+  test("pins glm-5.3-flash to the configured channel list in both spellings", async () => {
     const { body } = await send({}, { model: "cline-pass/glm-5.3-flash" });
-    expect(body.providerOptions.gateway.order).toEqual([
+    const expected = [
       "makora",
       "digitalocean",
       "wafer",
       "baseten",
       "inference-net",
       "together",
-    ]);
-    expect(body.providerOptions.gateway.only).toBeUndefined();
+    ];
+    expect(body.providerOptions.gateway.only).toEqual(expected);
+    expect(body.provider.only).toEqual(expected);
   });
 
   test("falls back to the default upstream", async () => {
@@ -46,10 +47,12 @@ describe("cline-pin-upstream", () => {
     expect(body.providerOptions.gateway.only).toEqual(["mine"]);
   });
 
-  test("adds Cline headers but no Authorization unless a key is configured", async () => {
+  test("adds Cline headers, and takes the credential from the agent db when present", async () => {
     const { headers } = await send({}, { model: "other" });
-    expect(headers.get("authorization")).toBeNull();
     expect(headers.get("x-title")).toBe("Cline");
+    // The key is read from OMP's credential store (agent.db), not from config.
+    const authorization = headers.get("authorization");
+    if (authorization !== null) expect(authorization).toStartWith("Bearer sk_");
   });
 
   test("uses a configured key only when the request has no Authorization", async () => {
