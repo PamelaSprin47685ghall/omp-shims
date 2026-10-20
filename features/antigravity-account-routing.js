@@ -1,9 +1,12 @@
 // Antigravity account tier routing:
-// - Gemini 4, Claude Opus, and Claude Sonnet always route to Ultra account(s).
-// - Other models (e.g. Gemini 3.8 Flash, 3.5 Flash Lite) prioritize Pro accounts,
+// - Claude Opus and Claude Sonnet always route to Ultra account(s).
+// - Other models (Gemini 4 since Antigravity opened it to Pro, Gemini 3.8 Flash,
+//   3.5 Flash Lite, ...) prioritize Pro accounts,
 //   falling back to Ultra if all Pro accounts fail (429 quota exhaustion or error).
 // - Sequential drain order: within each tier, exhaust one account completely
 //   (until 429 quota exhausted) before advancing to the next. No round-robin.
+// - A request pinned to one account (lazy-router, see lib/credential-pin.js) is
+//   left alone: the pin is the routing decision and its owner handles failover.
 //
 // Accounts are read from agent.db and automatically refreshed via the broker
 // when near expiry. An account returning 429 is placed in cooldown so subsequent
@@ -14,13 +17,15 @@
 //     "enabled": true,
 //     "ultraAccounts": ["ultra-account@example.com"],
 //     "proAccounts": ["pro-1@example.com", "pro-2@example.com"],
-//     "cooldownMs": 60000
+//     "cooldownMs": 60000,
+//     "ultraModelPattern": "opus|sonnet"   // optional; this is the default
 //   }
 
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { activePin } from "../lib/credential-pin.js";
 import {
   appendJsonLine,
   isCloudCodeStream,
@@ -32,7 +37,8 @@ import {
 const require_ = createRequire(import.meta.url);
 
 const DEFAULT_COOLDOWN_MS = 60_000;
-const DEFAULT_ULTRA_PATTERN = /gemini-4|opus|sonnet/i;
+const DEFAULT_ULTRA_PATTERN = /opus|sonnet/i;
+const PROVIDER = "google-antigravity";
 
 let cachedAccounts = [];
 let lastAccountsFetch = 0;
@@ -99,10 +105,8 @@ function loadAccounts(dbPath, ultraList, proList) {
   const db = new Database(dbPath, { readonly: true });
   try {
     const rows = db
-      .query(
-        "SELECT id, data FROM auth_credentials WHERE provider = 'google-antigravity' AND disabled_cause IS NULL ORDER BY id",
-      )
-      .all();
+      .query("SELECT id, data FROM auth_credentials WHERE provider = ? AND disabled_cause IS NULL ORDER BY id")
+      .all(PROVIDER);
     const loaded = [];
     for (const row of rows) {
       try {
@@ -192,6 +196,7 @@ export function install(config, context) {
   async function routeRequest(input, init, next) {
     const url = requestUrl(input);
     if (!isCloudCodeStream(url, extraHosts)) return next(input, init);
+    if (activePin(PROVIDER)) return next(input, init);
 
     const bodyString = requestBody(input, init);
     if (!bodyString) return next(input, init);
