@@ -1,0 +1,85 @@
+{
+  "$comment": "Lazy-router policy. A unit is one (provider, credential) pair; units with a credentialId are pinned to that agent.db credential, the others use the gateway's own credential (single-key providers). An entry lists units in priority order for one model; effort 'capped' means min(requested, medium), anything else means high. 'sameAs' splices another period's list. A route with 'derive' reuses another route's lists filtered to the required input modalities. 'modelTraits' corrects registry traits where a provider plugin is stricter than the registry says.",
+  "contextWindow": 500000,
+  "maxOutputTokens": 64000,
+  "units": {
+    "ag-u5": { "provider": "google-antigravity", "credentialId": 5 },
+    "ag-p22": { "provider": "google-antigravity", "credentialId": 22 },
+    "ag-p23": { "provider": "google-antigravity", "credentialId": 23 },
+    "ag-p24": { "provider": "google-antigravity", "credentialId": 24 },
+    "cx-18": { "provider": "openai-codex", "credentialId": 18 },
+    "cx-19": { "provider": "openai-codex", "credentialId": 19 },
+    "cp-15": { "provider": "cline-pass", "credentialId": 15 },
+    "cp-27": { "provider": "cline-pass", "credentialId": 27 },
+    "ki-16": { "provider": "kiro" },
+    "cc-17": { "provider": "commandcode" },
+    "xa-20": { "provider": "xai-oauth" },
+    "ch-21": { "provider": "charm-hyper" },
+    "qd-26": { "provider": "qoder-cn" },
+    "nv-29": { "provider": "nvidia" },
+    "og-30": { "provider": "opencode-go" },
+    "ol-31": { "provider": "ollama-cloud" },
+    "ct-yml": { "provider": "ctyun" }
+  },
+  "groups": {
+    "antigravity": ["ag-u5", "ag-p22", "ag-p23", "ag-p24"],
+    "cline-pass": ["cp-15", "cp-27"]
+  },
+  "routes": {
+    "default": {
+      "displayName": "Lazy · main session",
+      "input": ["text"],
+      "periods": {
+        "peak": [
+          { "units": ["cx-18"], "model": "openai-codex/gpt-6.1-sol", "effort": "capped" },
+          { "units": ["ki-16"], "model": "kiro/claude-opus-5-5", "effort": "capped" },
+          { "units": ["cc-17"], "model": "commandcode/minimax/minimax-m3.1-flash:free" },
+          { "units": "antigravity", "model": "google-antigravity/gemini-4-argon", "effort": "capped" },
+          { "units": ["cx-19"], "model": "openai-codex/gpt-6.1-sol", "effort": "capped" },
+          { "units": "cline-pass", "model": "cline-pass/glm-5.3-flash" },
+          { "units": ["ol-31"], "model": "ollama-cloud/glm-5.3-flash" },
+          { "units": ["qd-26"], "model": "qoder-cn/qwen3.8-flash" },
+          { "units": ["ch-21"], "model": "charm-hyper/qwen3.8-flash" },
+          { "units": ["xa-20"], "model": "xai-oauth/grok-4.7" },
+          { "units": ["ct-yml"], "model": "ctyun/deepseek-v4-pro-0813-oc" },
+          { "units": ["nv-29"], "model": "nvidia/z-ai/glm-5.3-flash" }
+        ],
+        "offPeak": [{ "units": ["og-30"], "model": "opencode-go/deepseek-v4.1-flash" }, { "sameAs": "peak" }]
+      }
+    },
+    "task": {
+      "displayName": "Lazy · sub-task",
+      "input": ["text"],
+      "periods": {
+        "peak": [
+          { "units": ["cc-17"], "model": "commandcode/minimax/minimax-m3.1-flash:free" },
+          { "units": "antigravity", "model": "google-antigravity/gemini-3.8-flash" },
+          { "units": ["qd-26"], "model": "qoder-cn/qwen3.8-flash" },
+          { "units": ["ch-21"], "model": "charm-hyper/qwen3.8-flash" },
+          { "units": ["ct-yml"], "model": "ctyun/deepseek-v4-pro-0813-oc" },
+          { "units": ["nv-29"], "model": "nvidia/z-ai/glm-5.3-flash" }
+        ],
+        "offPeak": [
+          { "units": ["cc-17"], "model": "commandcode/minimax/minimax-m3.1-flash:free" },
+          { "units": ["ct-yml"], "model": "ctyun/deepseek-v4-pro-0813-oc" },
+          { "units": "antigravity", "model": "google-antigravity/gemini-3.8-flash" },
+          { "units": ["qd-26"], "model": "qoder-cn/qwen3.8-flash" },
+          { "units": ["ch-21"], "model": "charm-hyper/qwen3.8-flash" },
+          { "units": ["nv-29"], "model": "nvidia/z-ai/glm-5.3-flash" }
+        ]
+      }
+    },
+    "vision": {
+      "displayName": "Lazy · vision",
+      "input": ["text", "image"],
+      "derive": { "from": "task" }
+    }
+  },
+  "modelTraits": {
+    "qoder-cn/qwen3.8-flash": {
+      "$comment": "The registry advertises minimal..high, but the qoder-cn plugin only accepts low/medium/xhigh upstream and rounds other levels UP (high -> xhigh). Levels both accept:",
+      "efforts": ["low", "medium"]
+    }
+  },
+  "peakWindows": [{ "from": "09:00", "to": "12:00" }, { "from": "14:00", "to": "18:00" }]
+}

@@ -8,8 +8,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `lazy-router`: `lazy/default`, `lazy/task` and `lazy/vision` virtual models that
+  route each request to the first healthy (provider, credential) unit of a
+  peak-aware route table, with explicit effort and `max_tokens`, probe-based
+  cooldown and failover, background recovery probes, and `GET /v1/lazy/status`.
+  Off by default.
+- `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - `models-bridge`: expose custom providers and models declared in `models.yml` to the
   auth-gateway reverse proxy, supplying credentials in memory and making them routable.
+
+### Changed
+
+- `antigravity-account-routing`: Gemini 4 is no longer Ultra-only (default
+  `ultraModelPattern` is now `opus|sonnet`), and requests pinned by `lazy-router`
+  pass through untouched.
+- With `lazy-router` enabled, OpenAI Codex uses HTTP/SSE instead of its WebSocket
+  transport (`PI_CODEX_WEBSOCKET=0`), so per-request credential pins apply.
 
 ### Security
 

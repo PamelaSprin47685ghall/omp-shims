@@ -43,6 +43,7 @@ on every machine.
 | `copilot-auto` | on | Negotiates GitHub Copilot `auto` routing and injects the required `Copilot-Session-Token` for gated models. |
 | `kiro-credential-sync` | on | Copies kiro-cli's rotated token into the auth-broker credential store so its refresh sweep stops failing. Started by the services only. |
 | `traffic-log` | **off** | Logs every inbound gateway request to hourly-rolling files (secrets in headers are redacted). |
+| `lazy-router` | **off** | Adds `lazy/default`, `lazy/task` and `lazy/vision`: virtual models that pick the first healthy (provider, credential) unit from a peak-aware route table (see [below](#lazy-router)). |
 | `native-loop-guard` | **off** | OMP's own thinking-loop guard. Off by default, because it aborts and retries the identical body; nothing here compensates loops. |
 
 `plugin-bridge` supplies credentials in memory only. Two features do write to
@@ -156,6 +157,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | `copilot-auto` | `OMP_SHIMS_COPILOT_AUTO` |
 | `kiro-credential-sync` | `OMP_SHIMS_KIRO_CREDENTIAL_SYNC` |
 | `traffic-log` | `OMP_SHIMS_TRAFFIC_LOG` |
+| `lazy-router` | `OMP_SHIMS_LAZY_ROUTER` |
 | `native-loop-guard` | `OMP_SHIMS_NATIVE_LOOP_GUARD` |
 
 ### Per-feature settings
@@ -171,7 +173,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | | | `OMP_SHIMS_AG_HASH_SALT` | built in |
 | `antigravity-capture` | `out` | `OMP_SHIMS_AG_CAPTURE_OUT` | `~/.omp/logs/antigravity-streams.jsonl` |
 | | `sampleEvery` (0 = failures only) | `OMP_SHIMS_AG_CAPTURE_SAMPLE` | `0` |
-| `antigravity-account-routing` | `ultraAccounts`, `proAccounts`, `cooldownMs`, `ultraModelPattern`, `out` | `OMP_SHIMS_AG_ACCOUNTS_OUT` | none, none, `60000`, `gemini-4\|opus\|sonnet`, `~/.omp/logs/antigravity-accounts.jsonl` |
+| `antigravity-account-routing` | `ultraAccounts`, `proAccounts`, `cooldownMs`, `ultraModelPattern`, `out` | `OMP_SHIMS_AG_ACCOUNTS_OUT` | none, none, `60000`, `opus\|sonnet`, `~/.omp/logs/antigravity-accounts.jsonl` |
 | `cline-pin-upstream` | `host` | `OMP_SHIMS_CLINE_PIN_HOST` | `api.cline.bot` |
 | | `upstream` | `OMP_SHIMS_CLINE_PIN_UPSTREAM` | `openai-compatible-private` |
 | | `models` (comma list, empty = all) | `OMP_SHIMS_CLINE_PIN_MODELS` | empty |
@@ -188,6 +190,12 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | `plugin-bridge` | `pluginsDir`, `plugins` (allow-list) | | `~/.omp/plugins`, all |
 | `models-bridge` | `modelsPath` | `OMP_SHIMS_MODELS_PATH` | `~/.omp/agent/models.yml` |
 | `vendor-shims` | `pluginsDir` | `OMP_SHIMS_VENDOR_SKIP=1` skips it | `~/.omp/plugins` |
+| `lazy-router` | `routesFile`, `holidaysFile` | | bundled `lib/lazy-router/*.json` |
+| | `probeIntervalMs`, `probeTimeoutMs` | | `1800000`, `90000` |
+| | `headerTimeoutMs`, `providerHeaderTimeoutMs` | | `300000`, `{ "commandcode": 1800000 }` |
+| | `statusPath` | | `/v1/lazy/status` |
+| | `codexHttpTransport` (sets `PI_CODEX_WEBSOCKET=0`) | | `true` |
+| | `out`, `logUpstreamBody` | | none, `false` |
 
 ### Plugin credentials
 
@@ -216,7 +224,8 @@ provider entirely to let OMP resolve its own credential.
 
 ### Antigravity account routing
 
-Models matching `ultraModelPattern` (Gemini 4, Claude Opus and Sonnet by default)
+Models matching `ultraModelPattern` (Claude Opus and Sonnet by default; Gemini 4 is
+open to Pro accounts)
 are sent to the accounts in `ultraAccounts`; everything else goes to `proAccounts`
 first and falls back to the Ultra accounts. Within a tier one account is used
 until it returns 429, then it cools down and the next one takes over. Accounts are
@@ -237,6 +246,41 @@ No accounts are built in, so list yours:
 
 With no `ultraAccounts`, Ultra-only models use the gateway's own credential. With
 no `proAccounts`, every account that is not an Ultra account counts as Pro.
+
+### Lazy router
+
+`lazy-router` publishes three virtual models in `/v1/models` (500k context, 64k
+output; only `lazy/vision` accepts images). A request for one of them is routed to
+the first healthy *unit* in its route table, where a unit is one provider plus one
+credential. Units with a `credentialId` are pinned to that `agent.db` credential;
+the others use the gateway's own credential.
+
+- **Peak hours**: route tables differ between peak (Beijing time, Mon to Fri,
+  09:00-12:00 and 14:00-18:00 on working days) and off-peak. Weekends, public
+  holidays and adjusted make-up working days (调休) follow the bundled
+  `holidays-cn.json`; years marked `"estimate"` are a best guess until the State
+  Council publishes the official schedule.
+- **Effort**: entries marked `capped` get `min(requested, medium)`, others `high`,
+  stepped down to the nearest level the model supports. Effort and
+  `max_tokens = 64000` are always sent explicitly, in each API format's own field.
+- **Failure handling**: the verdict is taken on the upstream status, before a byte
+  is streamed. A failed unit is probed with `Reply OK`; if the probe fails the
+  unit+model cools down (re-probed every `probeIntervalMs`) and the next unit is
+  tried at once; if the probe succeeds the same unit is retried once. When every
+  unit fails, the last upstream error is returned. There is no load balancing: a
+  unit that recovers takes its traffic back.
+- **Observability**: the response carries `x-lazy-router-unit` and
+  `x-lazy-router-model`; structured events go to stderr (and to `out` as JSONL);
+  `GET /v1/lazy/status` (gateway token required) shows the clock, health and routes.
+
+```json
+{ "features": { "lazy-router": { "enabled": true } } }
+```
+
+The bundled `routes.json` names this deployment's units; point `routesFile` at
+your own copy to change them. While the router is on, OpenAI Codex uses HTTP/SSE
+instead of its pooled WebSocket so the credential pin applies
+(`codexHttpTransport: false` opts out).
 
 ## CLI
 

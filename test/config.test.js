@@ -43,7 +43,7 @@ describe("loadConfig", () => {
       .filter(([, entry]) => !entry.enabled)
       .map(([name]) => name)
       .sort();
-    expect(off).toEqual(["antigravity-routing", "native-loop-guard", "traffic-log"]);
+    expect(off).toEqual(["antigravity-routing", "lazy-router", "native-loop-guard", "traffic-log"]);
     expect(features["antigravity-continuation"].maxContinuations).toBe(3);
   });
 
