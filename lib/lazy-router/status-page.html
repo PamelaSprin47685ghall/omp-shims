@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="lazy-status-path" content="{{statusPath}}">
+<title>Lazy Router · 状态</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1d2330;--muted:#6b7385;--line:#e5e8ee;--accent:#3b6cf6;--accent-bg:#eef3ff;--ok:#1f9d55;--ok-bg:#e6f6ec;--warn:#c27c0e;--warn-bg:#fdf3e1;--off:#8a91a3;--off-bg:#eef0f4;--peak:#d9480f;--peak-bg:#fff0e6;--calm:#0c8599;--calm-bg:#e3f6f8}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1218;--card:#171b23;--fg:#e6e9ef;--muted:#9099ab;--line:#262c38;--accent:#7d9bff;--accent-bg:#1c2540;--ok:#4cc38a;--ok-bg:#15291f;--warn:#f0b54a;--warn-bg:#2d2414;--off:#7c8496;--off-bg:#20252f;--peak:#ff8a50;--peak-bg:#33200f;--calm:#3bc9db;--calm-bg:#10282c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:24px 16px 40px}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;margin-bottom:20px}
+h1{font-size:20px;margin:0;font-weight:650;letter-spacing:.2px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-weight:600}
+.pill.peak{background:var(--peak-bg);color:var(--peak)}.pill.offPeak{background:var(--calm-bg);color:var(--calm)}
+.facts{display:flex;flex-wrap:wrap;gap:8px 20px;color:var(--muted)}.facts b{color:var(--fg);font-weight:600}
+.banner{display:none;margin-bottom:16px;padding:10px 14px;border-radius:10px;background:var(--warn-bg);color:var(--warn)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:18px;overflow:hidden}
+.card h2{font-size:15px;margin:0;padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:baseline}
+.card h2 small{color:var(--muted);font-weight:400}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 12px;text-align:left;white-space:nowrap;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:500;font-size:12px}
+tr:last-child td{border-bottom:0}
+tr.active td{background:var(--accent-bg)}tr.active td:first-child{box-shadow:inset 3px 0 var(--accent)}
+tr.skip td{color:var(--off)}
+.unit{font-weight:600}.tag{margin-left:6px;padding:1px 7px;border-radius:6px;font-size:11px;background:var(--accent);color:#fff}
+.badge{padding:2px 8px;border-radius:6px;font-size:12px;font-weight:600}
+.b-ok{background:var(--ok-bg);color:var(--ok)}.b-cool{background:var(--warn-bg);color:var(--warn)}.b-off{background:var(--off-bg);color:var(--off)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.dim{color:var(--muted)}
+details{padding:10px 16px;border-top:1px solid var(--line)}summary{cursor:pointer;color:var(--muted)}
+details ol{margin:8px 0 2px;padding-left:22px;columns:2 320px}details li{padding:1px 0}
+footer{color:var(--muted);font-size:12px;text-align:center;margin-top:8px}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>Lazy Router 状态</h1>
+<span id="period" class="pill">…</span>
+<div class="facts">
+<span>北京时间 <b id="local">—</b></span>
+<span>日期 <b id="day">—</b></span>
+<span>下次切换 <b id="next">—</b></span>
+<span>节假日表 <b id="calendar">—</b></span>
+</div>
+</header>
+<div id="banner" class="banner"></div>
+<section id="routes"></section>
+<footer>每 10 秒自动刷新 · 上次更新 <span id="updated">—</span></footer>
+</main>
+<template id="route-card">
+<div class="card">
+<h2><span class="title">路由</span><small class="sub"></small></h2>
+<div class="scroll"><table>
+<thead><tr><th>#</th><th>单元</th><th>模型</th><th>推理强度</th><th>状态</th><th>冷却原因</th><th>冷却开始</th><th>下次探测</th></tr></thead>
+<tbody></tbody>
+</table></div>
+<details><summary></summary><ol></ol></details>
+</div>
+</template>
+<script>
+(() => {
+  "use strict";
+  const STATUS_PATH = document.querySelector('meta[name="lazy-status-path"]').content;
+  const REFRESH_MS = 10000;
+  const TICK_MS = 1000;
+  const ROUTE_TITLES = { default: "主会话", task: "子任务", vision: "视觉" };
+  const PERIODS = { peak: "高峰", offPeak: "空闲" };
+  const DAY_KINDS = { workday: "工作日", weekend: "周末", holiday: "节假日", makeupWorkday: "调休补班" };
+  const CALENDARS = { official: "官方", estimate: "估算", uncovered: "未覆盖" };
+  const EFFORTS = { capped: "≤ medium", high: "high" };
+  const $ = (id) => document.getElementById(id);
+  let last;
+
+  /** An element with text content only: data never reaches the HTML parser. */
+  function el(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function span(seconds) {
+    const s = Math.max(0, Math.round(seconds));
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    if (d) return `${d} 天 ${h} 小时`;
+    if (h) return `${h} 小时 ${m} 分`;
+    if (m) return `${m} 分 ${s % 60} 秒`;
+    return `${s} 秒`;
+  }
+  const until = (iso) => (iso ? `${span((Date.parse(iso) - Date.now()) / 1000)}后` : "—");
+  const since = (iso) => (iso ? `${span((Date.now() - Date.parse(iso)) / 1000)}前` : "—");
+
+  function badge(row, catalogReady) {
+    if (!catalogReady) return el("span", "未知", "badge b-off");
+    if (!row.eligible) return el("span", "不适用", "badge b-off");
+    return row.health === "cooling" ? el("span", "冷却中", "badge b-cool") : el("span", "可用", "badge b-ok");
+  }
+
+  function renderRow(row, index, active, catalogReady) {
+    const tr = el("tr", null, active ? "active" : !row.eligible ? "skip" : "");
+    tr.append(el("td", index + 1, "dim"));
+    const unit = el("td", null);
+    unit.append(el("span", row.unit, "unit"));
+    if (active) unit.append(el("span", "当前", "tag"));
+    tr.append(unit, el("td", row.model, "mono"), el("td", EFFORTS[row.effortPolicy] ?? row.effortPolicy));
+    const state = el("td");
+    state.append(badge(row, catalogReady));
+    tr.append(state, el("td", row.reason ?? "—", row.reason ? "" : "dim"));
+    tr.append(el("td", since(row.coolingSince), "dim live-since"), el("td", until(row.nextProbeAt), "live-until"));
+    tr.querySelector(".live-since").dataset.at = row.coolingSince ?? "";
+    tr.querySelector(".live-until").dataset.at = row.nextProbeAt ?? "";
+    return tr;
+  }
+
+  function render(data) {
+    const period = $("period");
+    period.textContent = PERIODS[data.period] ?? data.period;
+    period.className = `pill ${data.period === "peak" ? "peak" : "offPeak"}`;
+    $("local").textContent = data.clock.localTime;
+    $("day").textContent = (DAY_KINDS[data.clock.dayKind] ?? data.clock.dayKind) + (data.clock.holiday ? ` · ${data.clock.holiday}` : "");
+    $("calendar").textContent = CALENDARS[data.clock.calendarStatus] ?? data.clock.calendarStatus;
+    $("next").dataset.at = data.nextSwitch?.at ?? "";
+    $("next").dataset.period = data.nextSwitch?.period ?? "";
+
+    const section = $("routes");
+    const cards = [];
+    for (const [name, rows] of Object.entries(data.routes)) {
+      const card = $("route-card").content.firstElementChild.cloneNode(true);
+      card.querySelector(".title").textContent = `${ROUTE_TITLES[name] ?? name} · lazy/${name}`;
+      const activeIndex = rows.findIndex((row) => row.eligible && row.health !== "cooling");
+      card.querySelector(".sub").textContent = activeIndex >= 0 ? `当前由 ${rows[activeIndex].unit} 服务` : "暂无可用单元";
+      const body = card.querySelector("tbody");
+      for (const [i, row] of rows.entries()) body.append(renderRow(row, i, i === activeIndex, data.catalogReady));
+      const other = data.alternate?.routes?.[name] ?? [];
+      card.querySelector("summary").textContent = `${PERIODS[data.alternate?.period] ?? "其他"}时段顺序（${other.length} 个单元）`;
+      const list = card.querySelector("ol");
+      for (const row of other) list.append(el("li", `${row.unit} · ${row.model}`));
+      cards.push(card);
+    }
+    section.replaceChildren(...cards);
+    tick();
+  }
+
+  function tick() {
+    const next = $("next");
+    next.textContent = next.dataset.at ? `${until(next.dataset.at)}（${PERIODS[next.dataset.period] ?? ""}）` : "—";
+    for (const cell of document.querySelectorAll(".live-since")) cell.textContent = since(cell.dataset.at);
+    for (const cell of document.querySelectorAll(".live-until")) cell.textContent = until(cell.dataset.at);
+    if (last) $("updated").textContent = since(last);
+  }
+
+  async function refresh() {
+    try {
+      const response = await fetch(STATUS_PATH, { cache: "no-store", headers: { accept: "application/json" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      render(await response.json());
+      last = new Date().toISOString();
+      $("banner").style.display = "none";
+    } catch (error) {
+      const banner = $("banner");
+      banner.textContent = `刷新失败：${error.message}，稍后重试`;
+      banner.style.display = "block";
+    }
+    tick();
+  }
+
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+  setInterval(tick, TICK_MS);
+})();
+</script>
+</body>
+</html>

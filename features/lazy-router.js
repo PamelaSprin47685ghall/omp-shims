@@ -13,6 +13,7 @@
 //   credentials.js / attempt.js  account pinning on the outbound fetch
 //   dispatcher.js                one attempt through the gateway, judged on first headers
 //   router.js                    orchestration, /v1/models entries, status view
+//   status-page.{js,html}        the browser view at GET /, fed by the status JSON
 //
 // Config (~/.omp/shims.json):
 //   "lazy-router": {
@@ -44,6 +45,7 @@ import { formatForPath } from "../lib/lazy-router/formats.js";
 import { HealthRegistry } from "../lib/lazy-router/health.js";
 import { loadPolicyData, RoutePolicy } from "../lib/lazy-router/policy.js";
 import { LazyRouter } from "../lib/lazy-router/router.js";
+import { createStatusPage, STATUS_PAGE_PATH } from "../lib/lazy-router/status-page.js";
 import { TierDirectory } from "../lib/lazy-router/tiers.js";
 import { UnitDirectory } from "../lib/lazy-router/units.js";
 
@@ -131,16 +133,23 @@ export function createLazyRouter(config, { log = report } = {}) {
 }
 
 /**
- * The inbound handler: lazy models, the status view and /v1/models; everything
- * else passes through. The status view is the one path answered without the
- * gateway token (it holds nothing account-identifying); /v1/models and lazy
- * requests still go through the gateway's own authentication.
+ * The inbound handler: lazy models, the status JSON, the status page and
+ * /v1/models; everything else passes through. Exactly two things are answered
+ * without the gateway token, both free of account-identifying data: GET (and
+ * HEAD) of the status page at "/", and GET of the status JSON. /v1/models and
+ * lazy requests still go through the gateway's own authentication.
  */
-export function lazyRouterHandler(handler, { router, dispatcher, statusPath }) {
+export function lazyRouterHandler(
+  handler,
+  { router, dispatcher, statusPath, statusPage = createStatusPage({ statusPath }) },
+) {
   return async function lazyRouterInbound(request, server) {
     dispatcher.bind(handler, server);
     const { pathname } = new URL(request.url);
 
+    if (pathname === STATUS_PAGE_PATH && (request.method === "GET" || request.method === "HEAD")) {
+      return statusPage(request.method);
+    }
     if (request.method === "GET") {
       if (pathname === MODELS_PATH) return withLazyModels(await handler(request, server), router.advertisedModels());
       if (pathname === statusPath) return router.status();

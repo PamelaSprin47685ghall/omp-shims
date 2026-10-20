@@ -103,3 +103,27 @@ describe("calendar helpers", () => {
     }
   });
 });
+
+describe("next period switch", () => {
+  const schedule = new PeakSchedule({
+    calendar: new HolidayCalendar(loadHolidayData()),
+    windows: loadPolicyData().peakWindows,
+  });
+  const next = (iso) => {
+    const found = schedule.nextSwitch(new Date(iso));
+    return found && { at: found.at.toISOString(), period: found.period };
+  };
+
+  test("an off-peak evening switches at the next working morning", () => {
+    expect(next("2026-10-20T11:00:00Z")).toEqual({ at: "2026-10-21T01:00:00.000Z", period: PERIOD.PEAK });
+  });
+
+  test("a peak morning switches at the lunch break", () => {
+    expect(next("2026-10-21T02:00:00Z")).toEqual({ at: "2026-10-21T04:00:00.000Z", period: PERIOD.OFF_PEAK });
+  });
+
+  test("a holiday run is skipped, make-up Saturday included", () => {
+    // 2026-10-01..07 is the National Day holiday, 10-10 a make-up Saturday (off-peak).
+    expect(next("2026-10-02T03:00:00Z")).toEqual({ at: "2026-10-08T01:00:00.000Z", period: PERIOD.PEAK });
+  });
+});

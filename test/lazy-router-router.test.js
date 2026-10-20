@@ -307,6 +307,8 @@ describe("LazyRouter", () => {
     await h.send({});
     const view = await h.router.status().json();
     expect(view.period).toBe("peak");
+    expect(view.alternate).toEqual({ period: "offPeak", routes: { default: [], vision: [] } });
+    expect(view.nextSwitch).toBeNull();
     expect(view.routes.vision.map((c) => [c.unit, c.eligible])).toEqual([
       ["p:gold#1", true],
       ["p:gold#2", true],

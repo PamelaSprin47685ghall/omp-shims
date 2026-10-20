@@ -19,6 +19,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Units are labelled `provider:tier#n`.
 - `lazy-router`: `GET /v1/lazy/status` is public and shows only unit labels,
   models, health, sanitized cooldown reasons and next probe times.
+- `lazy-router`: a status page at `GET /` (public, self-contained, auto-refreshing),
+  and `nextSwitch` / `alternate` (the other period's order) in the status JSON.
 - `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - `models-bridge`: expose custom providers and models declared in `models.yml` to the
   auth-gateway reverse proxy, supplying credentials in memory and making them routable.

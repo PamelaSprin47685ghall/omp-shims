@@ -293,8 +293,13 @@ account.
   `x-lazy-router-model`; structured events go to stderr (and to `out` as JSONL);
   `GET /v1/lazy/status` shows the current period, the units and, per route, each
   candidate's health, cooldown reason (status code only) and next probe time.
-  It is the one path served without the gateway token, so it holds no account
-  ids, e-mails, keys or upstream error text.
+  It holds no account ids, e-mails, keys or upstream error text, so it is served
+  without the gateway token.
+- **Status page**: `GET /` serves a self-contained page (light/dark, no external
+  assets, strict CSP) that renders the status JSON every 10 seconds: the current
+  period and next switch, and per route the ordered units with the serving one
+  highlighted, health, cooldown reason and probe countdown. The status JSON and
+  `GET`/`HEAD /` are the only paths answered without the gateway token.
 
 ```json
 { "features": { "lazy-router": { "enabled": true } } }
