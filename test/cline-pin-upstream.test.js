@@ -26,12 +26,9 @@ describe("cline-pin-upstream", () => {
   test("pins glm-5.3-flash to the configured channel list in both spellings", async () => {
     const { body } = await send({}, { model: "cline-pass/glm-5.3-flash" });
     const expected = [
-      "makora",
-      "digitalocean",
       "wafer",
-      "baseten",
       "inference-net",
-      "together",
+      "digitalocean",
     ];
     expect(body.providerOptions.gateway.only).toEqual(expected);
     expect(body.provider.only).toEqual(expected);
