@@ -30,6 +30,7 @@ on every machine.
 | Feature | Default | Purpose |
 | --- | --- | --- |
 | `plugin-bridge` | on | Loads installed OMP plugins and registers their providers with the gateway's model registry, so `kiro/*` and `commandcode/*` are served natively instead of returning `Unknown model`. |
+| `models-bridge` | on | Exposes custom models declared in `models.yml` to the gateway's model registry and supplies credentials, so they can be reverse-proxied. |
 | `vendor-shims` | on | Installs the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` packages that pi provider plugins expect the host to provide, and routes their streaming to the host and to each provider's own transport. |
 | `ipv6-first` | on | Connects over IPv6 when a host publishes AAAA records, falling back to IPv4 per address. |
 | `antigravity-system-instruction` | on | Sends the Antigravity system prompt as a leading user turn; upstream answers a real `systemInstruction` with a bogus 429. |
@@ -149,6 +150,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | `antigravity-account-routing` | `OMP_SHIMS_ANTIGRAVITY_ACCOUNT_ROUTING` |
 | `cline-pin-upstream` | `OMP_SHIMS_CLINE_PIN` |
 | `plugin-bridge` | `OMP_SHIMS_PLUGIN_BRIDGE` |
+| `models-bridge` | `OMP_SHIMS_MODELS_BRIDGE` |
 | `vendor-shims` | `OMP_SHIMS_VENDOR_SHIMS` |
 | `tool-id-hash` | `OMP_SHIMS_TOOL_ID_HASH` |
 | `copilot-auto` | `OMP_SHIMS_COPILOT_AUTO` |
@@ -184,6 +186,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | | `sweepMs` | | `300000` |
 | | | `OMP_SHIMS_TRAFFIC_LOG_BODY=0` omits bodies | bodies logged |
 | `plugin-bridge` | `pluginsDir`, `plugins` (allow-list) | | `~/.omp/plugins`, all |
+| `models-bridge` | `modelsPath` | `OMP_SHIMS_MODELS_PATH` | `~/.omp/agent/models.yml` |
 | `vendor-shims` | `pluginsDir` | `OMP_SHIMS_VENDOR_SKIP=1` skips it | `~/.omp/plugins` |
 
 ### Plugin credentials

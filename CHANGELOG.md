@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `models-bridge`: expose custom providers and models declared in `models.yml` to the
+  auth-gateway reverse proxy, supplying credentials in memory and making them routable.
+
 ### Security
 
 - Removed the hardcoded ClinePass API key and the built-in Antigravity account
