@@ -48,9 +48,9 @@ describe("bundled route tables", () => {
       "commandcode commandcode/minimax/minimax-m3.1-flash:free",
       "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
       "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
+      "ollama-cloud ollama-cloud/glm-5.3-flash",
       "cline-pass#1 cline-pass/glm-5.3-flash",
       "cline-pass#2 cline-pass/glm-5.3-flash",
-      "ollama-cloud ollama-cloud/glm-5.3-flash",
       "qoder-cn qoder-cn/qwen3.8-flash",
       "charm-hyper charm-hyper/qwen3.8-flash",
       "xai-oauth xai-oauth/grok-4.7",
@@ -107,6 +107,34 @@ describe("bundled route tables", () => {
     expect(policy.routeFor("lazy/task")).toBe("task");
     expect(policy.routeFor("lazy/nope")).toBeUndefined();
     expect(policy.routeFor("kiro/claude-opus-5-5")).toBeUndefined();
+  });
+});
+
+describe("concurrency limits", () => {
+  const unit = (provider, tier) => ({ provider, tier, key: provider, label: provider });
+
+  test("only ollama-cloud is limited, three requests per key", () => {
+    expect(policy.maxInFlight(unit("ollama-cloud"))).toBe(3);
+    for (const provider of ["cline-pass", "openai-codex", "kiro", "commandcode", "google-antigravity", "nvidia"]) {
+      expect(policy.maxInFlight(unit(provider, "pro"))).toBe(0);
+    }
+  });
+
+  test("a provider:tier limit overrides the provider's, and 0 means unlimited", () => {
+    const data = loadPolicyData();
+    data.maxInFlight = { $comment: "x", p: 2, "p:gold": 5, q: 0 };
+    const limits = new RoutePolicy(data);
+    expect(limits.maxInFlight(unit("p", "gold"))).toBe(5);
+    expect(limits.maxInFlight(unit("p", "silver"))).toBe(2);
+    expect(limits.maxInFlight(unit("q"))).toBe(0);
+  });
+
+  test("a negative or fractional limit is rejected when the table loads", () => {
+    for (const bad of [-1, 1.5, "3"]) {
+      const data = loadPolicyData();
+      data.maxInFlight = { p: bad };
+      expect(() => new RoutePolicy(data)).toThrow(/maxInFlight/);
+    }
   });
 });
 

@@ -1,6 +1,10 @@
 {
   "$comment": "Lazy-router policy. Each entry is a provider/model plus an optional account 'tier' (a name or an ordered list); it expands at runtime into one unit per enabled account of that provider and tier, oldest account first (see lib/lazy-router/units.js). An entry without 'tier' takes every account of the provider. Effort 'capped' means min(requested, medium), a level such as 'low' means exactly that level, and no effort means high. 'sameAs' splices another period's list. A route with 'derive' reuses another route's lists filtered to the required input modalities. 'modelTraits' corrects registry traits where a provider plugin is stricter than the registry says.",
   "contextWindow": 500000,
+  "maxInFlight": {
+    "$comment": "Concurrent upstream requests per unit (one per account or key), by 'provider' or 'provider:tier'. Absent or 0 = unlimited. A limited unit takes a request only while it has a free slot and the request is among the best prompt-cache matches it has seen lately (see lib/lazy-router/admission.js).",
+    "ollama-cloud": 3
+  },
   "maxOutputTokens": 64000,
   "routes": {
     "default": {
@@ -32,10 +36,10 @@
             "effort": "capped"
           },
           {
-            "model": "cline-pass/glm-5.3-flash"
+            "model": "ollama-cloud/glm-5.3-flash"
           },
           {
-            "model": "ollama-cloud/glm-5.3-flash"
+            "model": "cline-pass/glm-5.3-flash"
           },
           {
             "model": "qoder-cn/qwen3.8-flash"

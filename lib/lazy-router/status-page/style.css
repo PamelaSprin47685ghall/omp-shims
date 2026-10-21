@@ -167,6 +167,11 @@ tr.active td:first-child {
   background: var(--accent);
   color: #fff;
 }
+.tag.load {
+  color: var(--calm);
+  background: var(--calm-bg);
+  font-variant-numeric: tabular-nums;
+}
 .badge {
   padding: 2px 8px;
   border-radius: 6px;

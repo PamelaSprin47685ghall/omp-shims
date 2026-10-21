@@ -61,7 +61,7 @@ const CATALOG = {
  * real attempt layer, and answers like the auth-gateway does (502 on upstream
  * errors; a 200 event stream opened before upstream answers when streaming).
  */
-function harness({ upstream, faults = {}, bypass }) {
+function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
   const events = [];
   const emit = (event, detail = {}) => events.push({ event, ...detail });
   const timers = [];
@@ -112,6 +112,8 @@ function harness({ upstream, faults = {}, bypass }) {
           }
           try {
             const response = await callProvider(body);
+            // Like the gateway, read the provider's answer to the end before closing.
+            await response.text();
             const payload = response.ok
               ? { choices: [{ delta: { content: "OK" } }] }
               : { error: { message: "upstream" } };
@@ -124,6 +126,7 @@ function harness({ upstream, faults = {}, bypass }) {
     }
     try {
       const response = await callProvider(body);
+      await response.text();
       if (!response.ok)
         return Response.json({ error: { message: "upstream", type: "upstream_error" } }, { status: 502 });
       return Response.json({ served: body.model });
@@ -135,7 +138,7 @@ function harness({ upstream, faults = {}, bypass }) {
   const dispatcher = new GatewayDispatcher({ tokenPath: "/nonexistent", headerTimeoutMs: 2_000 });
   dispatcher.bind(handler, null);
   const router = new LazyRouter({
-    policy: new RoutePolicy(POLICY),
+    policy: new RoutePolicy(policy),
     units: new UnitDirectory({ tiers: fixedTiers(ACCOUNTS) }),
     schedule: { at: () => ({ period: "peak", localTime: "test", dayKind: "workday" }) },
     catalog: { ready: true, find: (ref) => CATALOG[ref] },
@@ -153,12 +156,13 @@ function harness({ upstream, faults = {}, bypass }) {
     },
   });
 
-  const send = (body) => {
+  const send = (body, { signal } = {}) => {
     const full = { model: "lazy/default", messages: [{ role: "user", content: "hi" }], ...body };
     const request = new Request("http://gateway.test/v1/chat/completions", {
       method: "POST",
       headers: { authorization: "Bearer client" },
       body: JSON.stringify(full),
+      signal,
     });
     return router.serve(CHAT, full, request);
   };
@@ -227,7 +231,7 @@ describe("LazyRouter", () => {
     healthy = true;
     await h.timers[0]();
     expect(h.names()).toContain("cooldown-exit");
-    const response = await h.send({});
+    const response = await h.send({ messages: [{ role: "user", content: "a new conversation" }] });
     expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#1");
   });
 
@@ -326,6 +330,134 @@ describe("LazyRouter", () => {
     expect(text).not.toContain("quota"); // upstream error text stays out
     expect(text).not.toContain("credentialId");
     expect(text).not.toMatch(/"p\/\d/); // internal unit keys stay out
+  });
+});
+
+/** POLICY with provider p limited to one request in flight per account. */
+const LIMITED = { ...POLICY, maxInFlight: { p: 1 } };
+
+/** A conversation long enough for its prefix to be recorded. */
+const conversation = (topic, turns = 1) => {
+  const messages = [{ role: "system", content: `${topic} `.repeat(800) }];
+  for (let i = 0; i < turns; i += 1) {
+    if (i > 0) messages.push({ role: "assistant", content: `answer ${i}` });
+    messages.push({ role: "user", content: `question ${i}` });
+  }
+  return { messages };
+};
+
+/** An upstream answer whose body stays open until `end()`. */
+function heldAnswer() {
+  let controller;
+  const response = new Response(new ReadableStream({ start: (c) => (controller = c) }), { status: 200 });
+  return { response, end: () => controller.close() };
+}
+
+describe("prefix affinity and capacity", () => {
+  const unitsOf = (h) => h.router.units.select("p");
+  const inFlight = (h) => unitsOf(h).map((unit) => h.router.capacity.inFlight(unit));
+  const servedBy = (response) => response.headers.get(SERVED_BY_HEADERS.unit);
+
+  test("a conversation stays on the unit that served it, even after a better unit recovers", async () => {
+    let healthy = false;
+    const h = harness({ upstream: (call) => (call.unit !== "p:gold#1" || healthy ? ok() : quota()) });
+    expect(servedBy(await h.send(conversation("alpha", 1)))).toBe("p:gold#2");
+    healthy = true;
+    await h.timers[0]();
+    expect(servedBy(await h.send(conversation("alpha", 2)))).toBe("p:gold#2");
+    expect(h.events.filter((e) => e.event === "route").at(-1)).toMatchObject({ unit: "p:gold#2", affinity: true });
+    expect(h.events.filter((e) => e.event === "route").at(-1).cachedShare).toBeGreaterThan(0.4);
+    // A new conversation takes the table order again.
+    expect(servedBy(await h.send(conversation("beta", 1)))).toBe("p:gold#1");
+    expect(h.router.affinity.view()).toMatchObject({ entries: 3, lookups: 3, hits: 1 });
+  });
+
+  test("a unit at its in-flight limit is skipped until its provider call ends", async () => {
+    const held = heldAnswer();
+    const h = harness({ policy: LIMITED, upstream: (_call, nth) => (nth === 1 ? held.response : ok()) });
+    const first = await h.send({ ...conversation("one"), stream: true });
+    expect(servedBy(first)).toBe("p:gold#1");
+    expect(inFlight(h)).toEqual([1, 0]);
+
+    const second = await h.send(conversation("two"));
+    expect(servedBy(second)).toBe("p:gold#2");
+    expect(h.events.find((e) => e.event === "held-back")).toMatchObject({
+      unit: "p:gold#1",
+      reason: "capacity",
+      inFlight: 1,
+      maxInFlight: 1,
+    });
+    expect(inFlight(h)).toEqual([1, 0]);
+
+    held.end();
+    expect(await first.text()).toContain('"OK"');
+    expect(inFlight(h)).toEqual([0, 0]);
+    expect(servedBy(await h.send(conversation("three")))).toBe("p:gold#1");
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("a client that goes away frees the slot at once", async () => {
+    const held = heldAnswer();
+    const h = harness({ policy: LIMITED, upstream: () => held.response });
+    const client = new AbortController();
+    const response = await h.send({ ...conversation("one"), stream: true }, { signal: client.signal });
+    expect(servedBy(response)).toBe("p:gold#1");
+    expect(inFlight(h)).toEqual([1, 0]);
+    client.abort();
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("failover releases the failed unit's calls, probe included", async () => {
+    const h = harness({ policy: LIMITED, upstream: (call) => (call.unit === "p:gold#1" ? quota() : ok()) });
+    const response = await h.send(conversation("one"));
+    expect(servedBy(response)).toBe("p:gold#2");
+    await response.text();
+    expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#1", "p:gold#1", "p:gold#2"]);
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("a rejected request releases its reservation", async () => {
+    const h = harness({ policy: LIMITED, upstream: ok });
+    expect((await h.send({ messages: "not-a-list" })).status).toBe(400);
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("admission keeps a limited unit for the requests its cache helps most", async () => {
+    const h = harness({ policy: LIMITED, upstream: ok });
+    expect(servedBy(await h.send(conversation("alpha", 1)))).toBe("p:gold#1");
+    expect(servedBy(await h.send(conversation("alpha", 2)))).toBe("p:gold#1");
+    // gold#1 saw x = 0 and x ≈ 0.5 for one slot: a new conversation (x = 0) is below its best share.
+    expect(servedBy(await h.send(conversation("beta", 1)))).toBe("p:gold#2");
+    expect(h.events.find((e) => e.event === "held-back")).toMatchObject({
+      unit: "p:gold#1",
+      reason: "admission",
+      cachedShare: 0,
+      window: 3,
+    });
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("the status view shows load for limited units only, and the affinity counters", async () => {
+    const h = harness({ policy: LIMITED, upstream: ok });
+    await h.send(conversation("one"));
+    const view = await h.router.status().json();
+    expect(view.units).toEqual([
+      { unit: "p:gold#1", provider: "p", tier: "gold", pinned: true, inFlight: 0, maxInFlight: 1, recentRequests: 1 },
+      { unit: "p:gold#2", provider: "p", tier: "gold", pinned: true, inFlight: 0, maxInFlight: 1, recentRequests: 0 },
+    ]);
+    const q = view.routes.default.find((row) => row.unit === "q");
+    expect("inFlight" in q).toBe(false);
+    expect(view.routes.default[0]).toMatchObject({ unit: "p:gold#1", inFlight: 0, maxInFlight: 1 });
+    expect(view.affinity).toMatchObject({ entries: 1, lookups: 1, hits: 0, hitRate: 0 });
+  });
+
+  test("unlimited units are never held back", async () => {
+    const held = heldAnswer();
+    const h = harness({ upstream: (_call, nth) => (nth === 1 ? held.response : ok()) });
+    await h.send({ ...conversation("one"), stream: true });
+    expect(servedBy(await h.send(conversation("two")))).toBe("p:gold#1");
+    expect(h.names()).not.toContain("held-back");
+    held.end();
   });
 });
 

@@ -35,9 +35,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - `models-bridge`: expose custom providers and models declared in `models.yml` to the
   auth-gateway reverse proxy, supplying credentials in memory and making them routable.
+- `lazy-router`: prefix-cache affinity. Requests are reduced to a canonical
+  transcript (the same bytes for the same conversation in Chat, Responses and
+  Messages); after serving, the digest of its first half is recorded against the
+  unit for 5 minutes, and a request starting with a recorded prefix tries that
+  unit first (longest match wins).
+- `lazy-router`: per-unit `maxInFlight` (routes.json or shims.json; 0 = unlimited),
+  counted at the outbound fetch layer until each provider call's body ends, and
+  cache-aware admission: a limited unit takes only requests whose cached share is
+  in the best `maxInFlight / N` of its last 5 minutes. `ollama-cloud` is limited
+  to 3 per key.
+- `lazy-router`: the status JSON and page show the in-flight load of limited units
+  and the affinity map's size and hit rate.
 
 ### Changed
 
+- `lazy-router`: `ollama-cloud/glm-5.3-flash` now comes before
+  `cline-pass/glm-5.3-flash` in `lazy/default`, so its slots fill first and the
+  overflow goes to ClinePass.
 - `antigravity-account-routing`: Gemini 4 is Ultra-only again (default
   `ultraModelPattern` is `gemini-4|opus|sonnet`): Pro accounts list it but cannot
   serve it. Requests pinned by `lazy-router` pass through untouched.

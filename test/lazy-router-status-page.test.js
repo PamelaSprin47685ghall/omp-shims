@@ -14,6 +14,7 @@ const STATUS = {
   clock: { period: "offPeak", localTime: "2026-10-20 20:00", dayKind: "workday", calendarStatus: "official" },
   nextSwitch: { at: "2026-10-21T01:00:00.000Z", period: "peak" },
   catalogReady: true,
+  affinity: { entries: 12, ttlMs: 300000, lookups: 8, hits: 5, hitRate: 0.625 },
   routes: {
     default: [
       {
@@ -26,7 +27,15 @@ const STATUS = {
         reason: "upstream 429 Too Many Requests",
         nextProbeAt: "2026-10-20T12:29:00.000Z",
       },
-      { unit: "p:gold#2", model: "p/big", effortPolicy: "capped", eligible: true, health: "alive" },
+      {
+        unit: "p:gold#2",
+        model: "p/big",
+        effortPolicy: "capped",
+        eligible: true,
+        health: "alive",
+        inFlight: 2,
+        maxInFlight: 3,
+      },
     ],
     vision: [
       { unit: "q", model: "q/text", effortPolicy: "high", eligible: false, health: "alive" },
@@ -140,6 +149,16 @@ describe("display model", () => {
     expect(main.rows.every((row) => row.health.text === "未知" && !row.active)).toBe(true);
   });
 
+  test("limited units show their load; unlimited ones show none; affinity reads as one line", () => {
+    const view = describeStatus(STATUS);
+    expect(view.routes[0].rows.map((row) => row.load)).toEqual([null, "2/3"]);
+    expect(view.affinity).toBe("12 条 · 命中 63%（5/8）");
+    expect(describeStatus({ ...STATUS, affinity: undefined }).affinity).toBe("—");
+    expect(
+      describeStatus({ ...STATUS, affinity: { entries: 0, ttlMs: 1, lookups: 0, hits: 0, hitRate: null } }).affinity,
+    ).toBe("0 条 · 命中 —（0/0）");
+  });
+
   test("relative times read naturally", () => {
     expect(relative("2026-10-20T12:29:00.000Z", NOW)).toBe("29 分 0 秒后");
     expect(relative("2026-10-20T11:59:00.000Z", NOW)).toBe("1 分 0 秒前");
@@ -149,6 +168,12 @@ describe("display model", () => {
 
 describe("page content", () => {
   const html = renderStatusPage(STATUS, { statusPath: STATUS_PATH, nowMs: NOW });
+
+  test("renders the load tag of a limited unit and the affinity counters", () => {
+    expect(html).toContain('<span class="tag load">并发 2/3</span>');
+    expect(html.match(/tag load/g)).toHaveLength(1);
+    expect(html).toContain('<b id="affinity">12 条 · 命中 63%（5/8）</b>');
+  });
 
   test("renders contiguous rows without the not-applicable unit", () => {
     const vision = html.slice(html.indexOf("lazy/vision"));

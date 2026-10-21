@@ -199,6 +199,9 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | | `statusPath` | | `/v1/lazy/status` |
 | | `codexHttpTransport` (sets `PI_CODEX_WEBSOCKET=0`) | | `true` |
 | | `out`, `logUpstreamBody` | | none, `false` |
+| | `maxInFlight` (merged over routes.json) | | `{}` (routes.json: `ollama-cloud: 3`) |
+| | `affinityTtlMs`, `affinityMaxEntries`, `affinityMinPrefixBytes` | | `300000`, `50000`, `1024` |
+| | `admissionWindowMs` | | `300000` |
 | `sse-heartbeat` | `intervalMs` | | `15000` |
 
 ### Plugin credentials
@@ -298,11 +301,37 @@ account.
   unit+model cools down (re-probed every `probeIntervalMs`) and the next unit is
   tried at once; if the probe succeeds the same unit is retried once. When every
   unit fails, the last upstream error is returned. There is no load balancing: a
-  unit that recovers takes its traffic back.
+  unit that recovers takes its traffic back with the next new conversation.
+- **Prefix-cache affinity**: each request is reduced to a canonical transcript
+  (system, user and assistant text, thinking, images by digest, tool calls with
+  sorted-key arguments, tool results; no ids, `cache_control`, sampling or limits),
+  identical across the three API formats, as UTF-8 bytes. After a request is
+  served, the digest of the first half of those bytes is recorded against the
+  unit for `affinityTtlMs` (5 minutes, refreshed on a hit; at most
+  `affinityMaxEntries`; prefixes under `affinityMinPrefixBytes` are not kept).
+  A later request that starts with a recorded prefix tries that unit first (the
+  longest match wins), so the provider's prompt cache keeps paying off. Lookup
+  hashes the request once, snapshotting the digest at every recorded length. Only
+  `(length, digest) → unit` is stored, never content.
+- **Concurrency limits**: `maxInFlight` in `routes.json` (or `shims.json`, merged
+  over it) caps the upstream requests one unit may have open, by `provider` or
+  `provider:tier`; 0 or absent means unlimited, and an unlimited unit is never
+  gated. Only `ollama-cloud` is limited (3 per key). A request counts from the
+  moment it is routed (a reservation) and, at the outbound fetch layer, from the
+  provider call leaving until its response body has been read or closed, it
+  failed, or it was aborted; probes count but are never gated. A full unit is
+  skipped.
+- **Cache-aware admission**: a limited unit with `maxInFlight = m` that saw `N`
+  requests in the last `admissionWindowMs` (5 minutes) admits a request only when
+  its cached share there, `x = matched length / request length`, is among the
+  best `m / N` of that window (at or above the `1 - m/N` quantile; ties admitted;
+  everyone while `m >= N`). New conversations thus overflow to the next unit
+  instead of crowding out the ones that unit's cache serves.
 - **Observability**: the response carries `x-lazy-router-unit` and
   `x-lazy-router-model`; structured events go to stderr (and to `out` as JSONL);
   `GET /v1/lazy/status` shows the current period, the units and, per route, each
-  candidate's health, cooldown reason (status code only) and next probe time.
+  candidate's health, cooldown reason (status code only) and next probe time,
+  the in-flight load of limited units and the affinity map's size and hit rate.
   It holds no account ids, e-mails, keys or upstream error text, so it is served
   without the gateway token.
 - **Status page**: `GET /` serves a page rendered on the server from the status
@@ -311,7 +340,8 @@ account.
   `/assets/lazy-status/`; the script refreshes the view from the status JSON every
   10 seconds. It shows the current period and next switch, and per route the
   units that can serve it, in order, with the serving one highlighted, health,
-  cooldown reason and probe countdown. The page, its assets and the status JSON
+  cooldown reason and probe countdown, `并发 n/m` on limited units, and the
+  affinity entries and hit rate in the header. The page, its assets and the status JSON
   are the only paths answered without the gateway token.
 
 ```json

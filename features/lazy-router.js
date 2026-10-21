@@ -8,7 +8,9 @@
 //   holidays-cn.json / calendar.js   Beijing-time peak detection
 //   catalog.js                   model traits from the gateway's ModelRegistry
 //   effort.js                    effort capping and fitting
-//   formats.js                   per-dialect body rewriting
+//   formats.js / canonical.js    per-dialect body rewriting and canonical transcripts
+//   affinity.js                  prefix-cache affinity: (length, digest) → unit, 5-minute TTL
+//   capacity.js / admission.js   in-flight limits per unit and cache-aware admission
 //   health.js                    per-(unit, model) cooldown + probe loop
 //   credentials.js / attempt.js  account pinning on the outbound fetch
 //   dispatcher.js                one attempt through the gateway, judged on first headers
@@ -27,7 +29,12 @@
 //     "providerHeaderTimeoutMs": { "commandcode": 1800000 },
 //     "upstreamHosts": {},           // provider → host, when it differs from the model baseUrl
 //     "codexHttpTransport": true,    // run Codex over HTTP/SSE so its account can be pinned
-//     "logUpstreamBody": false       // log effort/limit fields of each provider call
+//     "logUpstreamBody": false,      // log effort/limit fields of each provider call
+//     "maxInFlight": {},             // merged over routes.json: "provider" or "provider:tier" → limit
+//     "affinityTtlMs": 300000,       // lifetime of a recorded prefix (refreshed on a hit)
+//     "affinityMaxEntries": 50000,   // recorded prefixes kept at most
+//     "affinityMinPrefixBytes": 1024,// shorter prefixes are not recorded
+//     "admissionWindowMs": 300000    // rolling window of the admission distribution
 //   }
 
 import { homedir } from "node:os";
@@ -35,8 +42,11 @@ import { join } from "node:path";
 import { report } from "../lib/bootstrap.js";
 import { isGatewayProcess } from "../lib/gateway-process.js";
 import { readBody, wrapServe } from "../lib/inbound.js";
+import { AdmissionControl } from "../lib/lazy-router/admission.js";
+import { PrefixAffinity } from "../lib/lazy-router/affinity.js";
 import { createAttemptLayer } from "../lib/lazy-router/attempt.js";
 import { HolidayCalendar, loadHolidayData, PeakSchedule } from "../lib/lazy-router/calendar.js";
+import { InFlightTracker } from "../lib/lazy-router/capacity.js";
 import { ModelCatalog } from "../lib/lazy-router/catalog.js";
 import { CredentialStore } from "../lib/lazy-router/credentials.js";
 import { GatewayDispatcher } from "../lib/lazy-router/dispatcher.js";
@@ -70,7 +80,9 @@ async function withLazyModels(response, entries) {
 /** Build the router and its collaborators from the resolved feature config. */
 export function createLazyRouter(config, { log = report } = {}) {
   const ompDir = join(homedir(), ".omp");
-  const policy = new RoutePolicy(loadPolicyData(config.routesFile ?? undefined));
+  const policyData = loadPolicyData(config.routesFile ?? undefined);
+  policyData.maxInFlight = { ...(policyData.maxInFlight ?? {}), ...(config.maxInFlight ?? {}) };
+  const policy = new RoutePolicy(policyData);
   const calendar = new HolidayCalendar(loadHolidayData(config.holidaysFile ?? undefined));
   const schedule = new PeakSchedule({ calendar, windows: policy.peakWindows });
   const emit = createEventLog({ out: config.out ?? join(ompDir, "logs", "lazy-router.jsonl"), report: log });
@@ -106,6 +118,13 @@ export function createLazyRouter(config, { log = report } = {}) {
     health,
     dispatcher,
     faults,
+    affinity: new PrefixAffinity({
+      ttlMs: config.affinityTtlMs,
+      maxEntries: config.affinityMaxEntries,
+      minPrefixBytes: config.affinityMinPrefixBytes,
+    }),
+    capacity: new InFlightTracker({ limitOf: (unit) => policy.maxInFlight(unit) }),
+    admission: new AdmissionControl({ windowMs: config.admissionWindowMs }),
     emit,
     settings: {
       probePrompt: config.probePrompt,
