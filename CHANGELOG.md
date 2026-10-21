@@ -38,9 +38,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- `antigravity-account-routing`: Gemini 4 is no longer Ultra-only (default
-  `ultraModelPattern` is now `opus|sonnet`), and requests pinned by `lazy-router`
-  pass through untouched.
+- `antigravity-account-routing`: Gemini 4 is Ultra-only again (default
+  `ultraModelPattern` is `gemini-4|opus|sonnet`): Pro accounts list it but cannot
+  serve it. Requests pinned by `lazy-router` pass through untouched.
+- `lazy-router`: the bundled tables apply the same split. The `gemini-4-argon`
+  entry takes Ultra accounts only; the `gemini-3.8-flash` entries take Pro
+  accounts first, then Ultra.
 - With `lazy-router` enabled, OpenAI Codex uses HTTP/SSE instead of its WebSocket
   transport (`PI_CODEX_WEBSOCKET=0`), so per-request credential pins apply.
 

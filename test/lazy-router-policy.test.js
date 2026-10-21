@@ -47,9 +47,6 @@ describe("bundled route tables", () => {
       "kiro kiro/claude-opus-5-5",
       "commandcode commandcode/minimax/minimax-m3.1-flash:free",
       "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
-      "google-antigravity:pro#1 google-antigravity/gemini-4-argon",
-      "google-antigravity:pro#2 google-antigravity/gemini-4-argon",
-      "google-antigravity:pro#3 google-antigravity/gemini-4-argon",
       "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
       "cline-pass#1 cline-pass/glm-5.3-flash",
       "cline-pass#2 cline-pass/glm-5.3-flash",
@@ -73,29 +70,31 @@ describe("bundled route tables", () => {
       .candidates("default", PERIOD.PEAK, units)
       .candidates.filter((c) => c.effort === "capped")
       .map((c) => c.unit.label);
-    expect(capped).toEqual([
-      "openai-codex:plus#1",
-      "kiro",
-      "google-antigravity:ultra#1",
-      "google-antigravity:pro#1",
-      "google-antigravity:pro#2",
-      "google-antigravity:pro#3",
-      "openai-codex:pro#1",
-    ]);
+    expect(capped).toEqual(["openai-codex:plus#1", "kiro", "google-antigravity:ultra#1", "openai-codex:pro#1"]);
   });
 
-  test("task lists differ by period; an entry without a tier takes every account", () => {
+  test("task lists differ by period; gemini-3.8-flash drains Pro accounts before Ultra", () => {
     expect(order("task", PERIOD.PEAK).slice(0, 5)).toEqual([
       "commandcode commandcode/minimax/minimax-m3.1-flash:free",
-      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#3 google-antigravity/gemini-3.8-flash",
+      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
     ]);
     expect(order("task", PERIOD.OFF_PEAK).slice(0, 2)).toEqual([
       "commandcode commandcode/minimax/minimax-m3.1-flash:free",
       "ctyun ctyun/deepseek-v4-pro-0813-oc",
     ]);
+  });
+
+  test("gemini-4 is served by Ultra accounts only, in every period", () => {
+    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
+      const tiers = policy
+        .candidates("default", period, units)
+        .candidates.filter((c) => c.model.includes("gemini-4"))
+        .map((c) => c.unit.tier);
+      expect(tiers).toEqual(["ultra"]);
+    }
   });
 
   test("vision derives from task and requires image input", () => {
@@ -160,10 +159,9 @@ describe("runtime expansion", () => {
       "google-antigravity#1 google-antigravity/gemini-4-argon",
     );
     expect(order("task", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-3.8"))).toEqual([
-      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
-      "google-antigravity#1 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
+      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
     ]);
   });
 

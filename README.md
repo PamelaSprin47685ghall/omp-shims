@@ -175,7 +175,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | | | `OMP_SHIMS_AG_HASH_SALT` | built in |
 | `antigravity-capture` | `out` | `OMP_SHIMS_AG_CAPTURE_OUT` | `~/.omp/logs/antigravity-streams.jsonl` |
 | | `sampleEvery` (0 = failures only) | `OMP_SHIMS_AG_CAPTURE_SAMPLE` | `0` |
-| `antigravity-account-routing` | `ultraAccounts`, `proAccounts`, `cooldownMs`, `ultraModelPattern`, `out` | `OMP_SHIMS_AG_ACCOUNTS_OUT` | none, none, `60000`, `opus\|sonnet`, `~/.omp/logs/antigravity-accounts.jsonl` |
+| `antigravity-account-routing` | `ultraAccounts`, `proAccounts`, `cooldownMs`, `ultraModelPattern`, `out` | `OMP_SHIMS_AG_ACCOUNTS_OUT` | none, none, `60000`, `gemini-4\|opus\|sonnet`, `~/.omp/logs/antigravity-accounts.jsonl` |
 | `cline-pin-upstream` | `host` | `OMP_SHIMS_CLINE_PIN_HOST` | `api.cline.bot` |
 | | `upstream` | `OMP_SHIMS_CLINE_PIN_UPSTREAM` | `openai-compatible-private` |
 | | `models` (comma list, empty = all) | `OMP_SHIMS_CLINE_PIN_MODELS` | empty |
@@ -228,10 +228,12 @@ provider entirely to let OMP resolve its own credential.
 
 ### Antigravity account routing
 
-Models matching `ultraModelPattern` (Claude Opus and Sonnet by default; Gemini 4 is
-open to Pro accounts)
-are sent to the accounts in `ultraAccounts`; everything else goes to `proAccounts`
-first and falls back to the Ultra accounts. Within a tier one account is used
+Models matching `ultraModelPattern` (Gemini 4, Claude Opus and Sonnet by default;
+Pro accounts list Gemini 4 but cannot serve it) are sent only to the accounts in
+`ultraAccounts`; everything else goes to `proAccounts` first and falls back to the
+Ultra accounts. The bundled `lazy-router` tables follow the same split: their
+Gemini 4 entry takes Ultra accounts only, their Gemini 3.8 Flash entries Pro
+accounts first, then Ultra. Within a tier one account is used
 until it returns 429, then it cools down and the next one takes over. Accounts are
 read from OMP's `agent.db`, matched by e-mail address.
 

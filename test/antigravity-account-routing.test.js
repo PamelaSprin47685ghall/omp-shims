@@ -1,5 +1,24 @@
 import { describe, expect, test } from "bun:test";
-import { parseCooldownMs, selectProCandidates, sortByConfiguredOrder } from "../features/antigravity-account-routing.js";
+import {
+  DEFAULT_ULTRA_PATTERN,
+  parseCooldownMs,
+  selectProCandidates,
+  sortByConfiguredOrder,
+} from "../features/antigravity-account-routing.js";
+
+describe("DEFAULT_ULTRA_PATTERN", () => {
+  test("Gemini 4, Opus and Sonnet are Ultra-only", () => {
+    for (const model of ["gemini-4-argon", "gemini-4-argon-high", "claude-opus-4-6-thinking", "claude-sonnet-4-6"]) {
+      expect(DEFAULT_ULTRA_PATTERN.test(model)).toBe(true);
+    }
+  });
+
+  test("Gemini 3.8 Flash and other Gemini models are Pro-first", () => {
+    for (const model of ["gemini-3.8-flash", "gemini-3.8-flash-high", "gemini-3.5-flash-lite"]) {
+      expect(DEFAULT_ULTRA_PATTERN.test(model)).toBe(false);
+    }
+  });
+});
 
 describe("parseCooldownMs", () => {
   test("reads retryDelay / quotaResetDelay seconds", () => {

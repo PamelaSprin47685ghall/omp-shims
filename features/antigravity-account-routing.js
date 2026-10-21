@@ -1,7 +1,7 @@
 // Antigravity account tier routing:
-// - Claude Opus and Claude Sonnet always route to Ultra account(s).
-// - Other models (Gemini 4 since Antigravity opened it to Pro, Gemini 3.8 Flash,
-//   3.5 Flash Lite, ...) prioritize Pro accounts,
+// - Gemini 4, Claude Opus, and Claude Sonnet always route to Ultra account(s).
+//   Pro accounts list Gemini 4 but cannot serve it, so it never falls back to Pro.
+// - Other models (e.g. Gemini 3.8 Flash, 3.5 Flash Lite) prioritize Pro accounts,
 //   falling back to Ultra if all Pro accounts fail (429 quota exhaustion or error).
 // - Sequential drain order: within each tier, exhaust one account completely
 //   (until 429 quota exhausted) before advancing to the next. No round-robin.
@@ -18,7 +18,7 @@
 //     "ultraAccounts": ["ultra-account@example.com"],
 //     "proAccounts": ["pro-1@example.com", "pro-2@example.com"],
 //     "cooldownMs": 60000,
-//     "ultraModelPattern": "opus|sonnet"   // optional; this is the default
+//     "ultraModelPattern": "gemini-4|opus|sonnet"   // optional; this is the default
 //   }
 
 import { existsSync, readFileSync } from "node:fs";
@@ -37,7 +37,8 @@ import {
 const require_ = createRequire(import.meta.url);
 
 const DEFAULT_COOLDOWN_MS = 60_000;
-const DEFAULT_ULTRA_PATTERN = /opus|sonnet/i;
+/** Models only Ultra accounts can serve. */
+export const DEFAULT_ULTRA_PATTERN = /gemini-4|opus|sonnet/i;
 const PROVIDER = "google-antigravity";
 
 let cachedAccounts = [];

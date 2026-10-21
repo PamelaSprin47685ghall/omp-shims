@@ -23,7 +23,7 @@
           },
           {
             "model": "google-antigravity/gemini-4-argon",
-            "tier": ["ultra", "pro"],
+            "tier": "ultra",
             "effort": "capped"
           },
           {
@@ -73,7 +73,8 @@
             "effort": "low"
           },
           {
-            "model": "google-antigravity/gemini-3.8-flash"
+            "model": "google-antigravity/gemini-3.8-flash",
+            "tier": ["pro", "ultra"]
           },
           {
             "model": "qoder-cn/qwen3.8-flash"
@@ -97,7 +98,8 @@
             "model": "ctyun/deepseek-v4-pro-0813-oc"
           },
           {
-            "model": "google-antigravity/gemini-3.8-flash"
+            "model": "google-antigravity/gemini-3.8-flash",
+            "tier": ["pro", "ultra"]
           },
           {
             "model": "qoder-cn/qwen3.8-flash"
