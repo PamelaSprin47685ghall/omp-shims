@@ -7,6 +7,10 @@
 //   omp-shims disable <feature>   turn a feature off
 //   omp-shims env                 print the environment a service unit needs
 //   omp-shims systemd <unit>      print a ready-to-install unit file
+//   omp-shims add-account <provider> <plugin-package>
+//                                 log in with a token read from stdin, as a new account
+//   omp-shims repair-identities <provider>
+//                                 give accounts stored with a placeholder e-mail their own identity
 //
 // Toggles are written to ~/.omp/shims.json (override with OMP_SHIMS_CONFIG).
 
@@ -14,6 +18,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loginWithToken, pluginOAuth, repairIdentities, upsertCredential } from "../lib/account-import.js";
 import { CONFIG_PATH, describeConfig, FEATURES, loadConfig, writeConfig } from "../lib/config.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -28,6 +33,11 @@ function usage() {
   disable <feature>     disable a feature
   env                   environment exports for a service unit
   systemd <unit>        print a unit file (omp-auth-gateway|omp-auth-broker)
+  add-account <provider> <plugin-package>
+                        log in with a token read from stdin (never echoed) and
+                        store it as its own account in agent.db
+  repair-identities <provider>
+                        give accounts stored with a placeholder e-mail their own identity
   help                  this text
 
 config: ${CONFIG_PATH}`);
@@ -39,6 +49,8 @@ function fail(message) {
 }
 
 const [command, ...rest] = process.argv.slice(2);
+const ompDir = join(homedir(), ".omp");
+const agentDb = process.env.OMP_AGENT_DB ?? join(ompDir, "agent", "agent.db");
 
 switch (command) {
   case "status": {
@@ -89,6 +101,27 @@ switch (command) {
         .replaceAll("User=root", `User=${process.env.SUDO_USER ?? process.env.USER ?? "root"}`)
         .trimEnd(),
     );
+    break;
+  }
+
+  case "add-account": {
+    const [provider, packageName] = rest;
+    if (!provider || !packageName) fail("usage: omp-shims add-account <provider> <plugin-package>  (token on stdin)");
+    const token = (await Bun.stdin.text()).trim();
+    if (!token) fail("no token on stdin");
+    const oauth = await pluginOAuth(join(ompDir, "plugins"), packageName, provider);
+    const credential = await loginWithToken(oauth, token);
+    const { id, created } = upsertCredential(agentDb, provider, credential);
+    console.log(`${provider}: ${created ? "added" : "updated"} account row ${id} (${credential.accountId})`);
+    break;
+  }
+
+  case "repair-identities": {
+    const provider = rest[0];
+    if (!provider) fail("usage: omp-shims repair-identities <provider>");
+    const changed = repairIdentities(agentDb, provider);
+    for (const { id, identity } of changed) console.log(`${provider}: row ${id} -> ${identity}`);
+    if (changed.length === 0) console.log(`${provider}: nothing to repair`);
     break;
   }
 

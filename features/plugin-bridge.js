@@ -19,6 +19,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { activePin } from "../lib/credential-pin.js";
+import { stableIdentityOAuth } from "../lib/oauth-identity.js";
 
 const require_ = createRequire(import.meta.url);
 const PLUGIN_SOURCE = "omp-shims";
@@ -204,13 +206,18 @@ const PLACEHOLDER_KEYS = new Set([
  */
 const DEFAULT_MAX_RETRIES = 3;
 
-function wrapTransportEvents(transport) {
+function wrapTransportEvents(transport, provider) {
   return function wrappedStreamSimple(model, context, options) {
     const next = { ...options };
     // pi plugins pass `$ENV_KEY` placeholders for "resolve this yourself". OMP
     // would send the literal string as the bearer token, so drop it and let the
     // host resolve the real credential.
     if (PLACEHOLDER_KEYS.has(next.apiKey)) next.apiKey = undefined;
+    // A request pinned to one account of a provider that signs its requests
+    // with the token (see lib/lazy-router/credentials.js) gets that account's
+    // token here, where the plugin receives its key.
+    const pinnedSecret = activePin(provider)?.transportSecret;
+    if (pinnedSecret) next.apiKey = pinnedSecret;
     if (next.maxRetries === undefined) next.maxRetries = DEFAULT_MAX_RETRIES;
     const stream = transport(model, context, next);
     if (!stream || typeof stream.push !== "function") return stream;
@@ -246,8 +253,11 @@ export function install(config, context) {
   }
   log(`plugin-bridge: discovered ${packages.length} plugin(s) in ${pluginsDir}`);
 
-  // Providers registered per registry instance, so a rebuild re-registers once.
+  // One registration pass per registry at a time; `populated` registries
+  // already hold the plugins, so the hot getAll path skips them and only
+  // refresh(), which may rebuild the provider list, registers again.
   const inFlight = new WeakMap();
+  const populated = new WeakSet();
   /** registry → the plugin sources its syncExtensionSources keeps (wrapped once). */
   const keptSources = new WeakMap();
   // The gateway rebuilds its registry every few seconds and every rebuild
@@ -275,7 +285,8 @@ export function install(config, context) {
    * materializes that export; until then this is a no-op and the plugin's
    * oauth config still reaches the registry through registerProvider.
    */
-  function bridgeOauth(id, oauth) {
+  function bridgeOauth(id, pluginOauth) {
+    const oauth = stableIdentityOAuth(id, pluginOauth);
     const registerOauth = globalThis.__OMP_SHIMS_HOST__?.captured?.get("registerOAuthProvider");
     if (typeof registerOauth !== "function") {
       if (!oauthBridgeUnavailableLogged) {
@@ -358,8 +369,9 @@ export function install(config, context) {
                   // OMP consumes the provider's events directly, so a pi-shaped
                   // transport is adapted before it is handed over.
                   const config = { ...providerConfig };
+                  if (config.oauth) config.oauth = stableIdentityOAuth(id, config.oauth);
                   if (typeof config.streamSimple === "function") {
-                    config.streamSimple = wrapTransportEvents(config.streamSimple);
+                    config.streamSimple = wrapTransportEvents(config.streamSimple, id);
                     // Let the vendored pi-ai shim dispatch to this provider, for
                     // the case where a plugin streams through its own
                     // `streamSimple` import instead of OMP's pipeline.
@@ -446,6 +458,7 @@ export function install(config, context) {
         }
       }
     })().finally(() => {
+      populated.add(registry);
       inFlight.delete(registry);
     });
 
@@ -470,7 +483,7 @@ export function install(config, context) {
         // on its very first call, and let any async tail settle on its own.
         if (method === "getAll") {
           const res = original.apply(this, args);
-          registerInto(this).catch(() => {});
+          if (!populated.has(this)) registerInto(this).catch(() => {});
           return res;
         }
         // Async refresh: run original refresh first so built-in models load,

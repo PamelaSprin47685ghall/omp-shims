@@ -71,6 +71,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `plugin-bridge`: a registry is populated once and again after each `refresh()`,
+  instead of on every `getAll()`. The lazy-router catalog now also recognises the
+  live registry from `getAvailable` and `registerProvider`, which it had relied on
+  the per-read registration to trigger.
+- Qoder logins no longer overwrite each other: the plugin stores the placeholder
+  e-mail `user@qoder.com.cn` for accounts without one, and OMP keyed every login
+  on it. Logins and refreshes now carry `accountId` = the Qoder user id
+  (`lib/oauth-identity.js`), so each account is its own row and lazy-router unit.
+- `lazy-router`: Qoder signs each request with the account token, so a pinned
+  Qoder unit hands its account's token to the plugin transport instead of
+  swapping headers on the wire (`TRANSPORT_PINNED_PROVIDERS`).
+
+### Added
+
+- `omp-shims add-account <provider> <plugin-package>` (token on stdin) and
+  `omp-shims repair-identities <provider>`.
+
 - `lazy-router`: a client that closes its request no longer benches the unit
   serving it (a `499` used to put healthy units into a 30-minute cooldown), and
   the router stops there instead of probing, retrying and failing over for

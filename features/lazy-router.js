@@ -125,6 +125,7 @@ export function createLazyRouter(config, { log = report } = {}) {
     }),
     capacity: new InFlightTracker({ limitOf: (unit) => policy.maxInFlight(unit) }),
     admission: new AdmissionControl({ windowMs: config.admissionWindowMs }),
+    credentials,
     emit,
     settings: {
       probePrompt: config.probePrompt,
