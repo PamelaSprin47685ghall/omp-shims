@@ -81,7 +81,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `lazy-router`: an exhausted quota (`402`, `insufficient_quota`, Qoder `错误码 110`, ...)
   cools the unit without a wasted probe and fails over within the same request.
 - `plugin-bridge`: registration lines are logged when a provider's state changes,
-  not on every registry rebuild (several hundred lines an hour).
+  not on every registry pass (several hundred lines an hour), and the
+  `syncExtensionSources` wrapper is installed once per registry instead of
+  being restacked on every pass.
 
 - `models-bridge`: `ModelRegistry.getAll()` no longer re-reads models.yml,
   re-registers every provider and stacks another `syncExtensionSources` wrapper on

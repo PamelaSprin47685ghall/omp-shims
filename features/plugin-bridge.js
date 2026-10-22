@@ -246,11 +246,8 @@ export function install(config, context) {
   }
   log(`plugin-bridge: discovered ${packages.length} plugin(s) in ${pluginsDir}`);
 
-  // One registration pass per registry at a time; `populated` registries
-  // already hold the plugins, so the hot getAll path skips them and only
-  // refresh(), which may rebuild the provider list, registers again.
+  // Providers registered per registry instance, so a rebuild re-registers once.
   const inFlight = new WeakMap();
-  const populated = new WeakSet();
   /** registry → the plugin sources its syncExtensionSources keeps (wrapped once). */
   const keptSources = new WeakMap();
   // The gateway rebuilds its registry every few seconds and every rebuild
@@ -449,7 +446,6 @@ export function install(config, context) {
         }
       }
     })().finally(() => {
-      populated.add(registry);
       inFlight.delete(registry);
     });
 
@@ -474,7 +470,7 @@ export function install(config, context) {
         // on its very first call, and let any async tail settle on its own.
         if (method === "getAll") {
           const res = original.apply(this, args);
-          if (!populated.has(this)) registerInto(this).catch(() => {});
+          registerInto(this).catch(() => {});
           return res;
         }
         // Async refresh: run original refresh first so built-in models load,
