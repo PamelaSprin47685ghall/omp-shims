@@ -71,6 +71,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `lazy-router`: a client that closes its request no longer benches the unit
+  serving it (a `499` used to put healthy units into a 30-minute cooldown), and
+  the router stops there instead of probing, retrying and failing over for
+  nobody.
+- `lazy-router`: a provider call that dies on a stale keep-alive connection
+  before any answer is retried at once on a fresh connection instead of after a
+  probe.
+- `lazy-router`: an exhausted quota (`402`, `insufficient_quota`, Qoder `错误码 110`, ...)
+  cools the unit without a wasted probe and fails over within the same request.
+- `plugin-bridge`: registration lines are logged when a provider's state changes,
+  not on every registry rebuild (several hundred lines an hour).
+
 - `models-bridge`: `ModelRegistry.getAll()` no longer re-reads models.yml,
   re-registers every provider and stacks another `syncExtensionSources` wrapper on
   each call. A registry is populated once and again after each `refresh()`. Under

@@ -297,10 +297,17 @@ account.
   writes it into the provider body itself (`lib/lazy-router/upstream-effort.js`).
   The Command Code `minimax-m3.1-flash:free` entries think at `low`.
 - **Failure handling**: the verdict is taken on the upstream status, before a byte
-  is streamed. A failed unit is probed with `Reply OK`; if the probe fails the
-  unit+model cools down (re-probed every `probeIntervalMs`) and the next unit is
-  tried at once; if the probe succeeds the same unit is retried once. When every
-  unit fails, the last upstream error is returned. There is no load balancing: a
+  is streamed, and the reaction depends on whose fault the failure was
+  (`lib/lazy-router/failures.js`). A client that closed the request (or a gateway
+  `499`) ends it at once: no probe, no cooldown, no further unit. A provider call
+  whose connection closed before any answer (a stale keep-alive socket) is
+  retried once at once on a fresh connection. An exhausted quota (`402`, or
+  quota wording such as Qoder's `错误码 110`, whatever status wraps it) cools the
+  unit+model without a probe and the next unit is tried. Any other failure is
+  probed with `Reply OK`; if the probe fails the unit+model cools down (re-probed
+  every `probeIntervalMs`) and the next unit is tried at once; if the probe
+  succeeds the same unit is retried once. When every unit fails, the last
+  upstream error is returned. There is no load balancing: a
   unit that recovers takes its traffic back with the next new conversation.
 - **Prefix-cache affinity**: each request is reduced to a canonical transcript
   (system, user and assistant text, thinking, images by digest, tool calls with

@@ -246,8 +246,22 @@ export function install(config, context) {
   }
   log(`plugin-bridge: discovered ${packages.length} plugin(s) in ${pluginsDir}`);
 
-  // Providers registered per registry instance, so a rebuild re-registers once.
+  // One registration pass per registry at a time; `populated` registries
+  // already hold the plugins, so the hot getAll path skips them and only
+  // refresh(), which may rebuild the provider list, registers again.
   const inFlight = new WeakMap();
+  const populated = new WeakSet();
+  /** registry → the plugin sources its syncExtensionSources keeps (wrapped once). */
+  const keptSources = new WeakMap();
+  // The gateway rebuilds its registry every few seconds and every rebuild
+  // re-registers the plugins; report each provider's state once, and again
+  // only when it changes, so the journal is not flooded with repeats.
+  const lastReported = new Map();
+  const logOnChange = (subject, message) => {
+    if (lastReported.get(subject) === message) return;
+    lastReported.set(subject, message);
+    log(message);
+  };
   const tokens = new Map();
   // Plugin OAuth registrations, bridged into the host's runtime OAuth registry
   // as soon as each plugin registers a provider. The auth-broker's refresh path
@@ -276,7 +290,7 @@ export function install(config, context) {
     try {
       registerOauth({ ...oauth, id, sourceId: `${PLUGIN_SOURCE}:oauth` });
       registeredOauth.add(id);
-      log(`plugin-bridge: registered OAuth provider ${id}`);
+      logOnChange(`oauth:${id}`, `plugin-bridge: registered OAuth provider ${id}`);
     } catch (error) {
       log(`plugin-bridge: registerOAuthProvider(${id}) failed: ${error.message}`);
     }
@@ -359,7 +373,8 @@ export function install(config, context) {
                     bridgeOauth(id, providerConfig.oauth);
                   sources.add(`${PLUGIN_SOURCE}:${pkg.name}`);
                   tokens.set(id, resolveToken(id));
-                  log(
+                  logOnChange(
+                    `provider:${id}`,
                     `plugin-bridge: registered ${id} (${providerConfig.models?.length ?? 0} models) from ${pkg.name}`,
                   );
                 } catch (error) {
@@ -376,13 +391,20 @@ export function install(config, context) {
 
       // Keep our sources alive: the registry clears registrations for any source
       // missing from the enabled set, which would silently drop the plugins again.
+      // Wrapped once per registry; later passes only add to the kept set.
       const sync = registry.syncExtensionSources?.bind(registry);
       if (typeof sync === "function" && sources.size > 0) {
-        registry.syncExtensionSources = (enabled) => {
-          const merged = enabled instanceof Set ? new Set(enabled) : new Set(enabled ?? []);
-          for (const source of sources) merged.add(source);
-          return sync(merged);
-        };
+        const kept = keptSources.get(registry);
+        if (kept) for (const source of sources) kept.add(source);
+        else {
+          const keep = new Set(sources);
+          keptSources.set(registry, keep);
+          registry.syncExtensionSources = (enabled) => {
+            const merged = enabled instanceof Set ? new Set(enabled) : new Set(enabled ?? []);
+            for (const source of keep) merged.add(source);
+            return sync(merged);
+          };
+        }
       }
 
       // Credentials are supplied in memory through the key store, so nothing is
@@ -397,12 +419,12 @@ export function install(config, context) {
       if (keys && typeof keys.setConfig === "function") {
         for (const [provider, token] of tokens) {
           if (!token) {
-            log(`plugin-bridge: no credential configured for ${provider}`);
+            logOnChange(`key:${provider}`, `plugin-bridge: no credential configured for ${provider}`);
             continue;
           }
           try {
             keys.setConfig(provider, token);
-            log(`plugin-bridge: credential supplied for ${provider}`);
+            logOnChange(`key:${provider}`, `plugin-bridge: credential supplied for ${provider}`);
           } catch (error) {
             log(`plugin-bridge: setConfig(${provider}) failed: ${error.message}`);
           }
@@ -427,6 +449,7 @@ export function install(config, context) {
         }
       }
     })().finally(() => {
+      populated.add(registry);
       inFlight.delete(registry);
     });
 
@@ -451,7 +474,7 @@ export function install(config, context) {
         // on its very first call, and let any async tail settle on its own.
         if (method === "getAll") {
           const res = original.apply(this, args);
-          registerInto(this).catch(() => {});
+          if (!populated.has(this)) registerInto(this).catch(() => {});
           return res;
         }
         // Async refresh: run original refresh first so built-in models load,

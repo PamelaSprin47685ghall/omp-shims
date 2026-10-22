@@ -1,8 +1,8 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { makeTokenResolver } from "../features/plugin-bridge.js";
+import { install, makeTokenResolver } from "../features/plugin-bridge.js";
 import { tempDir } from "./helpers.js";
 
 const TOKEN = "tok_0123456789abcdefghijklmnop";
@@ -49,5 +49,59 @@ describe("makeTokenResolver", () => {
       a: { env: "OMP_SHIMS_TEST_TOKEN", json: { file: "/nonexistent", path: "x" } },
     });
     expect(resolve("a")).toBeUndefined();
+  });
+});
+
+describe("registry hooks", () => {
+  test("getAll registers once per registry; refresh re-registers; repeats are not logged; sync is not stacked", async () => {
+    const pluginsDir = tempDir();
+    const packageDir = join(pluginsDir, "node_modules", "fake-plugin");
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(join(pluginsDir, "package.json"), JSON.stringify({ dependencies: { "fake-plugin": "*" } }));
+    writeFileSync(join(packageDir, "package.json"), JSON.stringify({ name: "fake-plugin", main: "./index.js" }));
+    writeFileSync(
+      join(packageDir, "index.js"),
+      'export default (pi) => pi.registerProvider("fake", { models: [{ id: "m" }], streamSimple: () => {} });\n',
+    );
+
+    const registered = [];
+    let syncWraps = 0;
+    class FakeModelRegistry {
+      constructor() {
+        let sync = (enabled) => enabled;
+        Object.defineProperty(this, "syncExtensionSources", {
+          get: () => sync,
+          set: (next) => {
+            syncWraps++;
+            sync = next;
+          },
+        });
+      }
+      registerProvider(name) {
+        registered.push(name);
+      }
+      async refresh() {}
+      getAll() {
+        return [];
+      }
+    }
+    const previousHost = globalThis.__OMP_SHIMS_HOST__;
+    globalThis.__OMP_SHIMS_HOST__ = { captured: new Map([["ModelRegistry", FakeModelRegistry]]), observe: () => {} };
+    const lines = [];
+    try {
+      install({ pluginsDir }, { log: (line) => lines.push(line) });
+      const registry = new FakeModelRegistry();
+      registry.getAll();
+      await registry.refresh(); // joins the pass getAll started
+      for (let i = 0; i < 50; i++) registry.getAll();
+      expect(registered).toEqual(["fake"]);
+      await registry.refresh();
+      expect(registered).toEqual(["fake", "fake"]);
+      expect(syncWraps).toBe(1);
+      expect([...registry.syncExtensionSources(new Set(["x"]))].sort()).toEqual(["omp-shims:fake-plugin", "x"]);
+      expect(lines.filter((line) => line.startsWith("plugin-bridge: registered fake "))).toHaveLength(1);
+    } finally {
+      globalThis.__OMP_SHIMS_HOST__ = previousHost;
+    }
   });
 });

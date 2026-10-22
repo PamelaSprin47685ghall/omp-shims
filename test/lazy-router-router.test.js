@@ -270,6 +270,93 @@ describe("LazyRouter", () => {
     ]);
   });
 
+  test("a client that leaves during an attempt ends the request without blaming the unit", async () => {
+    const client = new AbortController();
+    const h = harness({
+      upstream: () => {
+        client.abort();
+        return quota();
+      },
+    });
+    const response = await h.send({}, { signal: client.signal });
+    expect(response.status).toBe(499);
+    expect(h.names()).toEqual(["route", "client-gone"]);
+    expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#1"]);
+    expect(h.health.isAlive("p/1 p/big")).toBe(true);
+  });
+
+  test("a gateway 499 is the client's doing: no probe, no cooldown, no next unit", async () => {
+    const h = harness({ upstream: () => new Response('{"error":"client closed request"}', { status: 499 }) });
+    const response = await h.send({});
+    expect(response.status).toBe(499);
+    expect(h.names()).not.toContain("cooldown-enter");
+    expect(h.names()).not.toContain("probe");
+    expect(h.calls).toHaveLength(1);
+  });
+
+  test("a client gone before the next candidate stops the failover", async () => {
+    const client = new AbortController();
+    const h = harness({
+      upstream: (call) => {
+        if (call.body.max_completion_tokens === 32) client.abort(); // during the probe
+        return quota();
+      },
+    });
+    const response = await h.send({}, { signal: client.signal });
+    expect(response.status).toBe(499);
+    expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#1", "p:gold#1"]);
+    expect(h.names().at(-1)).toBe("client-gone");
+  });
+
+  test("a connection closed before any answer is retried at once on a fresh one, without a probe", async () => {
+    const h = harness({
+      upstream: (call, nth) => {
+        if (call.unit === "p:gold#1" && nth === 1) throw new Error("The connection was closed.");
+        return ok();
+      },
+    });
+    const response = await h.send({});
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#1");
+    expect(h.names()).toEqual(["route", "attempt-failed", "retry-fresh-connection", "served"]);
+    expect(h.events[1]).toMatchObject({ failure: "stale-connection", source: "network" });
+  });
+
+  test("a fresh connection that fails too benches the unit and moves on", async () => {
+    const h = harness({
+      upstream: (call) => {
+        if (call.unit === "p:gold#1") throw new Error("ECONNRESET: The socket connection was closed unexpectedly.");
+        return ok();
+      },
+    });
+    const response = await h.send({});
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#2");
+    expect(h.names()).toEqual([
+      "route",
+      "attempt-failed",
+      "retry-fresh-connection",
+      "attempt-failed",
+      "cooldown-enter",
+      "route",
+      "served",
+    ]);
+  });
+
+  test("an exhausted quota benches the unit without a probe and fails over within the request", async () => {
+    const exhausted = () =>
+      new Response(
+        JSON.stringify({
+          error: { message: "[Qoder CN 额度限制] 今日调用次数已达上限 (Billing daily count exceeded, 错误码 110)" },
+        }),
+        { status: 502 },
+      );
+    const h = harness({ upstream: (call) => (call.unit === "p:gold#1" ? exhausted() : ok()) });
+    const response = await h.send({});
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#2");
+    expect(h.names()).toEqual(["route", "attempt-failed", "cooldown-enter", "route", "served"]);
+    expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#1", "p:gold#2"]);
+    expect(h.events.find((e) => e.event === "cooldown-enter").reason).toMatch(/^quota: /);
+  });
+
   test("image requests skip text-only candidates", async () => {
     const h = harness({ upstream: quota });
     const response = await h.send({
