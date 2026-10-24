@@ -62,6 +62,12 @@ describe("classifyFailure", () => {
     }
   });
 
+  test("qoder hard capacity is account-scoped and cools immediately without a probe", () => {
+    const message =
+      "[Qoder CN 无可用容量] 网关回 serviceAvailable:false（子码 RESOURCE_LIMIT，队列长度 0，优先级通道 p3，模型 qfmodel）";
+    expect(classifyFailure(outcome({ status: 502, source: "stream", message }))).toBe(FAILURE.QUOTA);
+  });
+
   test("a provider plugin crash cools the unit instead of probing it again", () => {
     for (const message of [
       "undefined is not an object (evaluating 'e.content.length')",

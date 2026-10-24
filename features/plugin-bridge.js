@@ -207,6 +207,25 @@ const PLACEHOLDER_KEYS = new Set([
  */
 const DEFAULT_MAX_RETRIES = 3;
 
+/**
+ * Qoder reports account/lane capacity exhaustion as an in-stream error instead
+ * of an HTTP 429. OMP can rotate sibling credentials before any replay-unsafe
+ * output, but only when the terminal error carries usage-limit semantics. Add a
+ * machine-readable marker while preserving the provider's detailed message.
+ */
+export function normalizeQoderCapacityEvent(provider, event) {
+  if (provider !== "qoder" && provider !== "qoder-cn") return event;
+  if (event?.type !== "error") return event;
+  const message = event?.error?.errorMessage;
+  if (typeof message !== "string" || !message.includes("serviceAvailable:false")) return event;
+  if (!message.includes("RESOURCE_LIMIT") && !/无可用容量|no spare capacity/i.test(message)) return event;
+  if (/resource_exhausted/i.test(message)) return event;
+  return {
+    ...event,
+    error: { ...event.error, errorMessage: `${message}\n[omp-shims:qoder-capacity resource_exhausted]` },
+  };
+}
+
 function normalizeCommandCodeContext(context) {
   if (!context || !Array.isArray(context.messages)) return context;
   const messages = context.messages.map((message) => {
@@ -241,6 +260,7 @@ function wrapTransportEvents(transport, provider) {
 
     const originalPush = stream.push.bind(stream);
     stream.push = (event) => {
+      event = normalizeQoderCapacityEvent(provider, event);
       if (event?.type !== "text_end" && event?.type !== "thinking_end") return originalPush(event);
       if (Array.isArray(event.content)) return originalPush(event);
       const { content, ...rest } = event;

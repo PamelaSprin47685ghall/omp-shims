@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { install, makeTokenResolver } from "../features/plugin-bridge.js";
+import { install, makeTokenResolver, normalizeQoderCapacityEvent } from "../features/plugin-bridge.js";
 import { tempDir } from "./helpers.js";
 
 const TOKEN = "tok_0123456789abcdefghijklmnop";
@@ -49,6 +49,32 @@ describe("makeTokenResolver", () => {
       a: { env: "OMP_SHIMS_TEST_TOKEN", json: { file: "/nonexistent", path: "x" } },
     });
     expect(resolve("a")).toBeUndefined();
+  });
+});
+
+describe("Qoder capacity normalization", () => {
+  test("marks hard account capacity as resource_exhausted for host credential rotation", () => {
+    const event = {
+      type: "error",
+      error: {
+        errorMessage:
+          "[Qoder CN 无可用容量] 网关回 serviceAvailable:false（子码 RESOURCE_LIMIT，队列长度 0，优先级通道 p3）",
+      },
+    };
+    const normalized = normalizeQoderCapacityEvent("qoder-cn", event);
+    expect(normalized).not.toBe(event);
+    expect(normalized.error.errorMessage).toContain("resource_exhausted");
+    expect(event.error.errorMessage).not.toContain("resource_exhausted");
+  });
+
+  test("does not relabel ordinary provider errors or other providers", () => {
+    const ordinary = { type: "error", error: { errorMessage: "Qoder server error" } };
+    const other = {
+      type: "error",
+      error: { errorMessage: "serviceAvailable:false RESOURCE_LIMIT" },
+    };
+    expect(normalizeQoderCapacityEvent("qoder-cn", ordinary)).toBe(ordinary);
+    expect(normalizeQoderCapacityEvent("fake", other)).toBe(other);
   });
 });
 
