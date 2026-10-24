@@ -363,11 +363,13 @@ export function install(config, context) {
 
     const task = (async () => {
       const sources = new Set();
+      const discoverableProviders = new Set();
       for (const { id, config: providerConfig } of internalProviders) {
         try {
           registry.registerProvider(id, mistralVibeProviderConfig(), `${PLUGIN_SOURCE}:internal`);
           if (providerConfig.oauth) bridgeOauth(id, providerConfig.oauth);
           sources.add(`${PLUGIN_SOURCE}:internal`);
+          if (typeof providerConfig.fetchDynamicModels === "function") discoverableProviders.add(id);
           logOnChange(`provider:${id}`, `plugin-bridge: registered ${id} (${providerConfig.models?.length ?? 0} models) from omp-shims`);
         } catch (error) {
           log(`plugin-bridge: registerProvider(${id}) failed: ${error.message}`);
@@ -409,6 +411,7 @@ export function install(config, context) {
                   if (providerConfig.oauth && typeof providerConfig.oauth === "object")
                     bridgeOauth(id, providerConfig.oauth);
                   sources.add(`${PLUGIN_SOURCE}:${pkg.name}`);
+                  if (typeof providerConfig.fetchDynamicModels === "function") discoverableProviders.add(id);
                   tokens.set(id, resolveToken(id));
                   logOnChange(
                     `provider:${id}`,
@@ -468,6 +471,18 @@ export function install(config, context) {
         }
       } else {
         log("plugin-bridge: registry has no authStorage.keys.setConfig; credentials left to OMP");
+      }
+
+      // registerProvider installs fetchDynamicModels managers, but discovery is
+      // deferred until refreshDiscoverableProviders. The gateway refresh that
+      // led here already finished before plugin providers were registered, so
+      // drive their first credential-aware catalog refresh now.
+      if (discoverableProviders.size > 0 && typeof registry.refreshDiscoverableProviders === "function") {
+        try {
+          await registry.refreshDiscoverableProviders(discoverableProviders, "online-if-uncached");
+        } catch (error) {
+          log(`plugin-bridge: dynamic model discovery failed: ${error.message}`);
+        }
       }
 
       if (process.env.OMP_SHIMS_DEBUG_REGISTRY === "1") {

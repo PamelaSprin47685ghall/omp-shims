@@ -81,6 +81,10 @@ describe("registry hooks", () => {
         registered.push(name);
       }
       async refresh() {}
+      async refreshDiscoverableProviders(providers, strategy) {
+        this.discoveries ??= [];
+        this.discoveries.push({ providers: [...providers], strategy });
+      }
       getAll() {
         return [];
       }
@@ -99,6 +103,8 @@ describe("registry hooks", () => {
       expect(syncWraps).toBe(1);
       expect([...registry.syncExtensionSources(new Set(["x"]))].sort()).toEqual(["omp-shims:fake-plugin", "omp-shims:internal", "x"]);
       expect(lines.filter((line) => line.startsWith("plugin-bridge: registered fake "))).toHaveLength(1);
+      expect(registry.discoveries.length).toBeGreaterThanOrEqual(1);
+      expect(registry.discoveries.at(-1)).toEqual({ providers: ["mistral-vibe"], strategy: "online-if-uncached" });
     } finally {
       globalThis.__OMP_SHIMS_HOST__ = previousHost;
     }
