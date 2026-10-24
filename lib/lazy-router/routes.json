@@ -69,7 +69,7 @@
         "offPeak": [
           {
             "model": "opencode-go/deepseek-v4.1-flash",
-            "intelligence": "medium"
+            "intelligence": "excellent"
           },
           {
             "sameAs": "peak"

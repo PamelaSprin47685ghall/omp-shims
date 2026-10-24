@@ -61,6 +61,7 @@ describe("bundled route tables", () => {
   test("off-peak default is opencode-go first, then the whole peak list", () => {
     const offPeak = order("default", PERIOD.OFF_PEAK);
     expect(offPeak[0]).toBe("opencode-go opencode-go/deepseek-v4.1-flash");
+    expect(policy.candidates("default", PERIOD.OFF_PEAK, units).candidates[0].intelligence).toBe("excellent");
     expect(offPeak.slice(1)).toEqual(order("default", PERIOD.PEAK));
   });
 
