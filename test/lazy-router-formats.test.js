@@ -14,6 +14,15 @@ describe("rewriteBody", () => {
     expect(original.model).toBe("lazy/default");
   });
 
+  test("chat: a lazy streaming request asks the provider for usage", () => {
+    const next = rewriteBody(
+      chat,
+      { model: "lazy/default", stream: true, stream_options: { extra: true }, messages: [] },
+      { model: "p/m", effort: "medium", maxTokens: 64000 },
+    );
+    expect(next.stream_options).toEqual({ extra: true, include_usage: true });
+  });
+
   test("chat: no effort removes the field", () => {
     const next = rewriteBody(
       chat,

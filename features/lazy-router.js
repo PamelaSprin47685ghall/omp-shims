@@ -34,14 +34,19 @@
 //     "affinityTtlMs": 300000,       // lifetime of a recorded prefix (refreshed on a hit)
 //     "affinityMaxEntries": 50000,   // recorded prefixes kept at most
 //     "affinityMinPrefixBytes": 1024,// shorter prefixes are not recorded
-//     "admissionWindowMs": 300000    // rolling window of the admission distribution
+//     "admissionWindowMs": 300000,   // rolling window of the admission distribution
+//     "routing": {                    // weighted online routing
+//       "excellentPrior": 1.0, "mediumPrior": 0.0, "latencyWeight": 1.0,
+//       "rdInitial": 1.0, "rdFloor": 0.1, "rdSampleScale": 12, "rdWeight": 0.75,
+//       "affinityWeight": 0.5, "latencyScaleMs": 5000, "coldStartTotalMs": 10000
+//     }
 //   }
 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { report } from "../lib/bootstrap.js";
 import { isGatewayProcess } from "../lib/gateway-process.js";
-import { readBody, wrapServe } from "../lib/inbound.js";
+import { readBody, withBody, withUsageRequest, wrapServe } from "../lib/inbound.js";
 import { AdmissionControl } from "../lib/lazy-router/admission.js";
 import { PrefixAffinity } from "../lib/lazy-router/affinity.js";
 import { createAttemptLayer } from "../lib/lazy-router/attempt.js";
@@ -128,6 +133,7 @@ export function createLazyRouter(config, { log = report } = {}) {
     credentials,
     emit,
     settings: {
+      routing: config.routing ?? {},
       probePrompt: config.probePrompt,
       probeMaxTokens: config.probeMaxTokens,
       probeTimeoutMs: config.probeTimeoutMs,
@@ -192,7 +198,16 @@ export function lazyRouterHandler(
     } catch {
       body = undefined;
     }
-    if (!body || !router.handles(body.model)) return handler(request, server);
+    if (!body || !router.handles(body.model)) {
+      // A direct model id: the gateway serves it, but its latency and speed
+      // belong in the same per-model window as the routed ones. Ask for the
+      // usage frame the speed is computed from, which the gateway only emits
+      // when the client requests it.
+      const startedAt = Date.now();
+      const usage = text ? withUsageRequest(pathname, text) : undefined;
+      const forwarded = usage === undefined ? request : withBody(request, usage);
+      return router.measureDirect(body?.model, await handler(forwarded, server), startedAt, format, request.signal);
+    }
     return router.serve(format, body, request);
   };
 }

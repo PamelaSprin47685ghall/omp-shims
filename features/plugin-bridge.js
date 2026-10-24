@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { activePin } from "../lib/credential-pin.js";
 import { stableIdentityOAuth } from "../lib/oauth-identity.js";
+import { MISTRAL_VIBE_PROVIDER_ID, mistralVibeProviderConfig } from "../lib/mistral-vibe-provider.js";
 
 const require_ = createRequire(import.meta.url);
 const PLUGIN_SOURCE = "omp-shims";
@@ -206,8 +207,24 @@ const PLACEHOLDER_KEYS = new Set([
  */
 const DEFAULT_MAX_RETRIES = 3;
 
+function normalizeCommandCodeContext(context) {
+  if (!context || !Array.isArray(context.messages)) return context;
+  const messages = context.messages.map((message) => {
+    if (message.role !== "assistant") return message;
+    const thinking = message.reasoning_content ?? message.reasoning;
+    if (typeof thinking !== "string" || thinking === "") return message;
+    const content = Array.isArray(message.content) ? [...message.content] : [];
+    if (!content.some((part) => part?.type === "thinking")) {
+      content.unshift({ type: "thinking", thinking });
+    }
+    return { ...message, content };
+  });
+  return { ...context, messages };
+}
+
 function wrapTransportEvents(transport, provider) {
   return function wrappedStreamSimple(model, context, options) {
+    const nextContext = provider === "commandcode" ? normalizeCommandCodeContext(context) : context;
     const next = { ...options };
     // pi plugins pass `$ENV_KEY` placeholders for "resolve this yourself". OMP
     // would send the literal string as the bearer token, so drop it and let the
@@ -219,7 +236,7 @@ function wrapTransportEvents(transport, provider) {
     const pinnedSecret = activePin(provider)?.transportSecret;
     if (pinnedSecret) next.apiKey = pinnedSecret;
     if (next.maxRetries === undefined) next.maxRetries = DEFAULT_MAX_RETRIES;
-    const stream = transport(model, context, next);
+    const stream = transport(model, nextContext, next);
     if (!stream || typeof stream.push !== "function") return stream;
 
     const originalPush = stream.push.bind(stream);
@@ -247,11 +264,8 @@ export function install(config, context) {
   const only = config.plugins ? new Set(config.plugins) : null;
 
   const packages = discoverPlugins(pluginsDir).filter((pkg) => !only || only.has(pkg.name));
-  if (packages.length === 0) {
-    log("plugin-bridge: no installed plugins found", { pluginsDir });
-    return;
-  }
-  log(`plugin-bridge: discovered ${packages.length} plugin(s) in ${pluginsDir}`);
+  if (packages.length === 0) log("plugin-bridge: no external plugins found", { pluginsDir });
+  else log(`plugin-bridge: discovered ${packages.length} plugin(s) in ${pluginsDir}`);
 
   // One registration pass per registry at a time; `populated` registries
   // already hold the plugins, so the hot getAll path skips them and only
@@ -276,6 +290,7 @@ export function install(config, context) {
   // without an entry fails every refresh ("Unknown OAuth provider") and each
   // request pays the failed-refresh retry before falling back.
   const registeredOauth = new Set();
+  const internalProviders = [{ id: MISTRAL_VIBE_PROVIDER_ID, config: mistralVibeProviderConfig() }];
 
   let oauthBridgeUnavailableLogged = false;
 
@@ -313,6 +328,9 @@ export function install(config, context) {
    * modules are cached by the module loader, so the double init is cheap.
    */
   const eagerInit = (async () => {
+    for (const { id, config: providerConfig } of internalProviders) {
+      if (providerConfig.oauth) bridgeOauth(id, providerConfig.oauth);
+    }
     for (const pkg of packages) {
       for (const entry of pkg.entries) {
         let module;
@@ -345,6 +363,16 @@ export function install(config, context) {
 
     const task = (async () => {
       const sources = new Set();
+      for (const { id, config: providerConfig } of internalProviders) {
+        try {
+          registry.registerProvider(id, mistralVibeProviderConfig(), `${PLUGIN_SOURCE}:internal`);
+          if (providerConfig.oauth) bridgeOauth(id, providerConfig.oauth);
+          sources.add(`${PLUGIN_SOURCE}:internal`);
+          logOnChange(`provider:${id}`, `plugin-bridge: registered ${id} (${providerConfig.models?.length ?? 0} models) from omp-shims`);
+        } catch (error) {
+          log(`plugin-bridge: registerProvider(${id}) failed: ${error.message}`);
+        }
+      }
       for (const pkg of packages) {
         for (const entry of pkg.entries) {
           let module;

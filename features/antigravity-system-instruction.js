@@ -21,6 +21,7 @@ import {
 } from "../lib/fetch-chain.js";
 
 const MIN_OUTPUT_BUDGET = 8192;
+const EMPTY_AGENT_PROMPT = "Continue.";
 
 export function install(_config, context) {
   const addFetchHandler = context.addFetchHandler ?? sharedAddFetchHandler;
@@ -52,6 +53,16 @@ export function install(_config, context) {
     }
 
     if (isAgent) {
+      // The host schema permits an empty OpenAI messages array, but Cloud Code
+      // rejects an empty native `contents` with INVALID_ARGUMENT. Treat an
+      // empty agent turn as the same continuation nudge we already use when a
+      // repaired history ends on the model, rather than sending an invalid
+      // provider payload and then blaming/cooling a healthy account.
+      if (!Array.isArray(request.contents) || request.contents.length === 0) {
+        request.contents = [{ role: "user", parts: [{ text: EMPTY_AGENT_PROMPT }] }];
+        changed = true;
+      }
+
       const generation = request.generationConfig;
       if (generation && typeof generation.maxOutputTokens === "number" && generation.maxOutputTokens > 0 && generation.maxOutputTokens < MIN_OUTPUT_BUDGET) {
         generation.maxOutputTokens = MIN_OUTPUT_BUDGET;

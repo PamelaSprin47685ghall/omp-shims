@@ -36,6 +36,16 @@ describe("antigravity-system-instruction", () => {
     expect(await sentBody(installSystemInstruction, {}, envelope, "https://example.com/v1/chat")).toEqual(envelope);
   });
 
+  test("repairs an empty agent contents array before Cloud Code sees it", async () => {
+    const body = await sentBody(installSystemInstruction, {}, { requestType: "agent", request: { contents: [] } });
+    expect(body.request.contents).toEqual([{ role: "user", parts: [{ text: "Continue." }] }]);
+  });
+
+  test("repairs a missing agent contents field too", async () => {
+    const body = await sentBody(installSystemInstruction, {}, { requestType: "agent", request: {} });
+    expect(body.request.contents).toEqual([{ role: "user", parts: [{ text: "Continue." }] }]);
+  });
+
   test("raises a small maxOutputTokens floor so function calls are not truncated upstream", async () => {
     const body = await sentBody(installSystemInstruction, {}, {
       ...envelope,

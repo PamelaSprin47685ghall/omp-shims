@@ -141,7 +141,7 @@ describe("display model", () => {
       ["p:gold#1", false, "冷却中"],
       ["p:gold#2", true, "可用"],
     ]);
-    expect(main.sub).toBe("当前由 p:gold#2 服务");
+    expect(main.sub).toBe("基础首选 p:gold#2 服务");
   });
 
   test("while the catalog is unknown every unit shows, marked 未知, none active", () => {
@@ -157,6 +157,91 @@ describe("display model", () => {
     expect(
       describeStatus({ ...STATUS, affinity: { entries: 0, ttlMs: 1, lookups: 0, hits: 0, hitRate: null } }).affinity,
     ).toBe("0 条 · 命中 —（0/0）");
+  });
+
+  test("route rows expose Glicko-like rating, RD and intelligence", () => {
+    const rows = STATUS.routes.default.map((row, index) => ({
+      ...row,
+      intelligence: index === 0 ? "excellent" : "medium",
+      rating: index === 0 ? 0.4 : -0.2,
+      rd: index === 0 ? 0.2 : 0.8,
+      routingScore: index === 0 ? 0.55 : 0.4,
+    }));
+    const [main] = describeStatus({ ...STATUS, routes: { ...STATUS.routes, default: rows } }).routes;
+    expect(main.rows.map((row) => [row.intelligence, row.rating, row.rd, row.routingScore])).toEqual([
+      ["优秀", "0.400", "0.200", "0.550"],
+      ["中等", "-0.200", "0.800", "0.400"],
+    ]);
+  });
+
+  test("per-model table is busiest first and reports Bayesian completions", () => {
+    const view = describeStatus({
+      ...STATUS,
+      perf: {
+        "p/busy": { ttftMs: 900, totalMs: 12_000, samples: 120, imputedSamples: 4, tokens: 0 },
+        "p/light": { ttftMs: 200, totalMs: 800, samples: 5, imputedSamples: 1, tokens: 0 },
+      },
+    });
+    expect(view.models.map((row) => [row.model, row.samples, row.imputed])).toEqual([
+      ["p/busy", "120", "4"],
+      ["p/light", "5", "1"],
+    ]);
+  });
+
+  test("per-model latency and speed come from the window, per model", () => {
+    const status = {
+      ...STATUS,
+      perf: {
+        "p/big": { ttftMs: 640, tokensPerSecond: 37.42, totalMs: 4_600, samples: 12, tokens: 900 },
+        "q/text": { ttftMs: 2_400, tokensPerSecond: null, totalMs: 900, samples: 3, tokens: 0 },
+      },
+    };
+    const view = describeStatus(status);
+    const [main] = view.routes;
+    expect(main.rows.map((row) => [row.model, row.ttft, row.speed, row.total])).toEqual([
+      ["p/big", "640 毫秒", "37.4 tok/s", "4.6 秒"],
+      ["p/big", "640 毫秒", "37.4 tok/s", "4.6 秒"],
+    ]);
+    // Keyed by model: another model's samples never show on these rows.
+    const [elsewhere] = describeStatus({
+      ...STATUS,
+      perf: { "q/text": { ttftMs: 2_400, tokensPerSecond: 12, totalMs: 900, samples: 3, tokens: 90 } },
+    }).routes;
+    expect(elsewhere.rows.map((row) => [row.ttft, row.speed, row.total])).toEqual([
+      ["—", "—", "—"],
+      ["—", "—", "—"],
+    ]);
+  });
+
+  test("the per-model table lists every model with samples, busiest first", () => {
+    const view = describeStatus({
+      ...STATUS,
+      perf: {
+        "p/small": { ttftMs: 300, tokensPerSecond: 20, totalMs: 1_100, samples: 2, tokens: 40 },
+        "p/busy": { ttftMs: 900, tokensPerSecond: 44.44, totalMs: 75_000, samples: 9, tokens: 400 },
+        "p/nospeed": { ttftMs: 1_200, tokensPerSecond: null, totalMs: 900, samples: 4, tokens: null, ttftSamples: 4, tokenSamples: 0, speedSamples: 0 },
+      },
+    });
+    expect(view.models.map((row) => [row.model, row.ttft, row.speed, row.total, row.samples, row.tokens])).toEqual([
+      ["p/busy", "900 毫秒", "44.4 tok/s", "1 分 15 秒", "9", "400"],
+      ["p/nospeed", "1.2 秒", "—", "900 毫秒", "4", "—"],
+      ["p/small", "300 毫秒", "20.0 tok/s", "1.1 秒", "2", "40"],
+    ]);
+  });
+
+  test("unknown token usage is a dash and coverage exposes missing telemetry", () => {
+    const view = describeStatus({
+      ...STATUS,
+      perf: { "p/a": { ttftMs: 500, totalMs: 1_000, samples: 10, ttftSamples: 9, tokenSamples: 3, speedSamples: 2, tokens: null } },
+    });
+    expect(view.models[0].tokens).toBe("—");
+    expect(view.models[0].coverage).toBe("首字 9/10 · usage 3/10 · 速度 2/10");
+  });
+
+  test("a model with no samples shows dashes", () => {
+    const [main] = describeStatus({ ...STATUS, perf: undefined }).routes;
+    expect(main.rows.map((row) => [row.ttft, row.speed, row.total])).toEqual(main.rows.map(() => ["—", "—", "—"]));
+    expect(describeStatus({ ...STATUS, perf: undefined }).models).toEqual([]);
   });
 
   test("relative times read naturally", () => {

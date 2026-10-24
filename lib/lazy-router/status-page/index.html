@@ -23,14 +23,24 @@
 </div>
 </header>
 <div id="banner" class="banner" hidden></div>
+<section id="models">{{models}}</section>
 <section id="routes">{{routes}}</section>
 <footer><span id="live">页面生成于服务器；启用 JavaScript 后自动刷新</span> · 上次更新 <span id="updated" data-since="{{updatedAt}}">刚刚</span></footer>
 </main>
+<template id="models-card">
+<div class="card">
+<h2><span class="title">模型延迟与速度</span><small class="sub">近 30 分钟滚动窗口 · 中断请求按右删失贝叶斯估计完成态 · Glicko-like Rating/RD 在线路由</small></h2>
+<div class="scroll"><table>
+<thead><tr><th>模型</th><th>首字延迟</th><th>生成速度</th><th>总耗时</th><th>样本</th><th>补全样本</th><th>输出 tokens</th><th>数据覆盖</th></tr></thead>
+<tbody></tbody>
+</table></div>
+</div>
+</template>
 <template id="route-card">
 <div class="card">
 <h2><span class="title">路由</span><small class="sub"></small></h2>
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>单元</th><th>模型</th><th>推理强度</th><th>状态</th><th>冷却原因</th><th>冷却开始</th><th>下次探测</th></tr></thead>
+<thead><tr><th>#</th><th>单元</th><th>模型</th><th>推理强度</th><th>智力</th><th>Rating</th><th>RD</th><th>路由分</th><th>首字延迟</th><th>生成速度</th><th>总耗时</th><th>状态</th><th>冷却原因</th><th>冷却开始</th><th>下次探测</th></tr></thead>
 <tbody></tbody>
 </table></div>
 <details><summary></summary><ol></ol></details>

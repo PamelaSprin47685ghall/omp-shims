@@ -11,9 +11,11 @@
 
 const captured = new Map();
 const observers = [];
+const pendingGetters = new Map();
 
 globalThis.__OMP_SHIMS_HOST__ = {
   captured,
+  resolve: resolveHostExport,
   /** Subscribe to a host export, now and whenever it is (re)defined. */
   observe(name, observer) {
     observers.push({ name, observer });
@@ -27,7 +29,6 @@ globalThis.__OMP_SHIMS_HOST__ = {
 
 /** Poll until `read()` yields a usable value, then announce it. */
 function announce(name, read) {
-  let attempts = 0;
   const attempt = () => {
     if (captured.has(name)) return;
     let value;
@@ -36,9 +37,11 @@ function announce(name, read) {
     } catch {
       value = undefined;
     }
-    if (value === undefined || value === null || (typeof value === "function" && value.length === 0 && name !== "x")) {
-      attempts += 1;
-      if (attempts < 40) setTimeout(attempt, 25);
+    // A resolved zero-arity function is usable. Only an undefined/null read means the lazy getter is still in TDZ.
+    if (value === undefined || value === null) {
+      // Host getters stay in TDZ until their module finishes evaluating, which can
+      // be well after the first request. Keep polling; a resolved value stops it.
+      setTimeout(attempt, 25);
       return;
     }
     captured.set(name, value);
@@ -62,7 +65,9 @@ Object.defineProperty = function (target, property, descriptor) {
     typeof descriptor.get === "function"
   ) {
     const getter = descriptor.get;
-    announce(property, () => getter.call(this));
+    pendingGetters.set(property, () => getter.call(target));
+
+    announce(property, () => getter.call(target));
     descriptor.get = function (...args) {
       const value = getter.apply(this, args);
       if (!captured.has(property) && value !== undefined && value !== null) {
@@ -79,3 +84,17 @@ Object.defineProperty = function (target, property, descriptor) {
   }
   return originalDefineProperty.call(this, target, property, descriptor);
 };
+
+/** Read a host export now, even if the lazy getter resolved after polling started. */
+function resolveHostExport(name) {
+  if (captured.has(name)) return captured.get(name);
+  const read = pendingGetters.get(name);
+  if (!read) return undefined;
+  try {
+    const value = read();
+    if (value !== undefined && value !== null) captured.set(name, value);
+    return value;
+  } catch {
+    return undefined;
+  }
+}

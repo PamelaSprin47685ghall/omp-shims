@@ -16,6 +16,8 @@
   --peak-bg: #fff0e6;
   --calm: #0c8599;
   --calm-bg: #e3f6f8;
+  --err: #cf3f3f;
+  --err-bg: #fdeaea;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -36,6 +38,8 @@
     --peak-bg: #33200f;
     --calm: #3bc9db;
     --calm-bg: #10282c;
+    --err: #f26d6d;
+    --err-bg: #331a1a;
   }
 }
 * {
@@ -171,6 +175,17 @@ tr.active td:first-child {
   color: var(--calm);
   background: var(--calm-bg);
   font-variant-numeric: tabular-nums;
+}
+/* A degraded model: red wherever its numbers appear, so it reads at a glance. */
+tr.degraded td {
+  color: var(--err);
+}
+tr.degraded td:first-child {
+  box-shadow: inset 3px 0 var(--err);
+}
+.tag.degraded {
+  background: var(--err-bg);
+  color: var(--err);
 }
 .badge {
   padding: 2px 8px;

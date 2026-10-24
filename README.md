@@ -31,7 +31,7 @@ on every machine.
 | --- | --- | --- |
 | `plugin-bridge` | on | Loads installed OMP plugins and registers their providers with the gateway's model registry, so `kiro/*` and `commandcode/*` are served natively instead of returning `Unknown model`. |
 | `models-bridge` | on | Exposes custom models declared in `models.yml` to the gateway's model registry and supplies credentials, so they can be reverse-proxied. |
-| `vendor-shims` | on | Installs the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` packages that pi provider plugins expect the host to provide, and routes their streaming to the host and to each provider's own transport. |
+| `vendor-shims` | on | Installs the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` packages that pi provider plugins expect the host to provide, and routes their streaming to the host and to each provider's own transport. When the host exports no `streamSimple` for a standard api, it asks the model's Provider API once whether the account may use it, so a `403 upgrade_required` still reaches the provider's transport and its generate fallback can run. |
 | `ipv6-first` | on | Connects over IPv6 when a host publishes AAAA records, falling back to IPv4 per address. |
 | `antigravity-system-instruction` | on | Sends the Antigravity system prompt as a leading user turn; upstream answers a real `systemInstruction` with a bogus 429. |
 | `antigravity-routing` | **off** | Routes Gemini 3.6/3.7/3.8 Flash to the upstream `-tiered` models with a thinking level. |
@@ -295,7 +295,25 @@ account.
   reasoning traits where the provider plugin's catalog is wrong; for providers
   whose plugin drops the effort of such a model (Command Code), the attempt layer
   writes it into the provider body itself (`lib/lazy-router/upstream-effort.js`).
-  The Command Code `minimax-m3.1-flash:free` entries think at `low`.
+- `lazy-router`: rolling per-model serving performance. Every streamed answer —
+  routed or a direct model id — is measured for first-token latency (request to
+  the first event only the model can produce, not the gateway's own preamble)
+  and generation speed (the provider's own output-token total over the time
+  those tokens took), plus the average total request duration, which counts
+  every measured answer, streamed or delivered whole. Sums live in one-minute
+  buckets over a 30-minute window, so a long answer weighs what it should and a
+  fixed model recovers inside the window. `GET /v1/lazy/status` exposes them as
+  `perf`, the page shows three columns per route row plus a per-model table, and
+  chat streams now ask for `stream_options.include_usage` so the token totals
+  exist to measure. A model with more than 100 samples in the window and an
+  average total duration above 10 s (`degradeMinSamples` / `degradeTotalMs`) is
+  marked degraded: its rows turn red, and the router tries every healthy unit in
+  table order before any degraded one. A prefix-affinity match still outranks
+  the rule, so a warm prefix keeps its unit even while that model is red. The
+  verdict is latched for 30 minutes (`degradeHoldMs`), so a model near the
+  ceiling cannot flap between the two groups; after the period the window decides
+  again and a still-slow model is latched for another period.
+- `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - **Failure handling**: the verdict is taken on the upstream status, before a byte
   is streamed, and the reaction depends on whose fault the failure was
   (`lib/lazy-router/failures.js`). A client that closed the request (or a gateway

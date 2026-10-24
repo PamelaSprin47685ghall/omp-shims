@@ -15,7 +15,7 @@ const ACCOUNTS = [
   { id: 4, provider: "commandcode" },
   { id: 5, provider: "openai-codex", tier: "plus" },
   { id: 6, provider: "openai-codex", tier: "pro" },
-  { id: 7, provider: "xai-oauth" },
+  { id: 7, provider: "mistral-vibe" },
   { id: 8, provider: "charm-hyper" },
   { id: 9, provider: "google-antigravity", tier: "pro" },
   { id: 10, provider: "google-antigravity", tier: "pro" },
@@ -45,15 +45,14 @@ describe("bundled route tables", () => {
     expect(order("default", PERIOD.PEAK)).toEqual([
       "openai-codex:plus#1 openai-codex/gpt-6.1-sol",
       "kiro kiro/claude-opus-5-5",
-      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
       "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
       "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
+      "mistral-vibe mistral-vibe/zai-glm-5-3-flash",
       "ollama-cloud ollama-cloud/glm-5.3-flash",
       "cline-pass#1 cline-pass/glm-5.3-flash",
       "cline-pass#2 cline-pass/glm-5.3-flash",
       "qoder-cn qoder-cn/qwen3.8-flash",
       "charm-hyper charm-hyper/qwen3.8-flash",
-      "xai-oauth xai-oauth/grok-4.7",
       "ctyun ctyun/deepseek-v4-pro-0813-oc",
       "nvidia nvidia/z-ai/glm-5.3-flash",
     ]);
@@ -75,15 +74,15 @@ describe("bundled route tables", () => {
 
   test("task lists differ by period; gemini-3.8-flash drains Pro accounts before Ultra", () => {
     expect(order("task", PERIOD.PEAK).slice(0, 5)).toEqual([
-      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
       "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#3 google-antigravity/gemini-3.8-flash",
       "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
+      "qoder-cn qoder-cn/qwen3.8-flash",
     ]);
     expect(order("task", PERIOD.OFF_PEAK).slice(0, 2)).toEqual([
-      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
       "ctyun ctyun/deepseek-v4-pro-0813-oc",
+      "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
     ]);
   });
 
@@ -139,30 +138,14 @@ describe("concurrency limits", () => {
 });
 
 describe("fixed effort levels", () => {
-  test("commandcode minimax thinks at low effort wherever it is listed", () => {
-    const efforts = [
-      ["default", PERIOD.PEAK],
-      ["default", PERIOD.OFF_PEAK],
-      ["task", PERIOD.PEAK],
-      ["task", PERIOD.OFF_PEAK],
-    ].flatMap(([route, period]) =>
-      policy
-        .candidates(route, period, units)
-        .candidates.filter((c) => c.model === "commandcode/minimax/minimax-m3.1-flash:free")
-        .map((c) => c.effort),
-    );
-    expect(efforts).toEqual(["low", "low", "low", "low"]);
-  });
-
-  test("the minimax trait correction records the levels the endpoint accepts", () => {
-    const traits = policy.modelTraits["commandcode/minimax/minimax-m3.1-flash:free"];
-    expect(traits.reasoning).toBe(true);
-    expect(traits.efforts).toEqual(["low", "medium", "high"]);
+  test("the Qoder trait correction records only effort levels its endpoint accepts", () => {
+    const traits = policy.modelTraits["qoder-cn/qwen3.8-flash"];
+    expect(traits.efforts).toEqual(["low", "medium"]);
   });
 
   test("an unknown effort is rejected when the table loads", () => {
     const data = loadPolicyData();
-    data.routes.task.periods.peak = [{ model: "commandcode/minimax/minimax-m3.1-flash:free", effort: "turbo" }];
+    data.routes.task.periods.peak = [{ model: "qoder-cn/qwen3.8-flash", effort: "turbo" }];
     expect(() => new RoutePolicy(data).candidates("task", PERIOD.PEAK, units)).toThrow(/unknown effort "turbo"/);
   });
 });

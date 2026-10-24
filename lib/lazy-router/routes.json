@@ -9,57 +9,67 @@
   "routes": {
     "default": {
       "displayName": "Lazy · main session",
-      "input": ["text"],
+      "input": [
+        "text"
+      ],
       "periods": {
         "peak": [
           {
             "model": "openai-codex/gpt-6.1-sol",
             "tier": "plus",
-            "effort": "capped"
+            "effort": "capped",
+            "intelligence": "excellent"
           },
           {
             "model": "kiro/claude-opus-5-5",
-            "effort": "capped"
-          },
-          {
-            "model": "commandcode/minimax/minimax-m3.1-flash:free",
-            "effort": "low"
+            "effort": "capped",
+            "intelligence": "excellent"
           },
           {
             "model": "google-antigravity/gemini-4-argon",
             "tier": "ultra",
-            "effort": "capped"
+            "effort": "capped",
+            "intelligence": "excellent"
           },
           {
             "model": "openai-codex/gpt-6.1-sol",
             "tier": "pro",
-            "effort": "capped"
+            "effort": "capped",
+            "intelligence": "excellent"
           },
           {
-            "model": "ollama-cloud/glm-5.3-flash"
+            "model": "mistral-vibe/zai-glm-5-3-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "cline-pass/glm-5.3-flash"
+            "model": "ollama-cloud/glm-5.3-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "qoder-cn/qwen3.8-flash"
+            "model": "cline-pass/glm-5.3-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "charm-hyper/qwen3.8-flash"
+            "model": "qoder-cn/qwen3.8-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "xai-oauth/grok-4.7"
+            "model": "charm-hyper/qwen3.8-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "ctyun/deepseek-v4-pro-0813-oc"
+            "model": "ctyun/deepseek-v4-pro-0813-oc",
+            "intelligence": "medium"
           },
           {
-            "model": "nvidia/z-ai/glm-5.3-flash"
+            "model": "nvidia/z-ai/glm-5.3-flash",
+            "intelligence": "medium"
           }
         ],
         "offPeak": [
           {
-            "model": "opencode-go/deepseek-v4.1-flash"
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "intelligence": "medium"
           },
           {
             "sameAs": "peak"
@@ -69,71 +79,82 @@
     },
     "task": {
       "displayName": "Lazy · sub-task",
-      "input": ["text"],
+      "input": [
+        "text"
+      ],
       "periods": {
         "peak": [
           {
-            "model": "commandcode/minimax/minimax-m3.1-flash:free",
-            "effort": "low"
-          },
-          {
             "model": "google-antigravity/gemini-3.8-flash",
-            "tier": ["pro", "ultra"]
+            "tier": [
+              "pro",
+              "ultra"
+            ],
+            "intelligence": "medium"
           },
           {
-            "model": "qoder-cn/qwen3.8-flash"
+            "model": "qoder-cn/qwen3.8-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "charm-hyper/qwen3.8-flash"
+            "model": "charm-hyper/qwen3.8-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "ctyun/deepseek-v4-pro-0813-oc"
+            "model": "ctyun/deepseek-v4-pro-0813-oc",
+            "intelligence": "medium"
           },
           {
-            "model": "nvidia/z-ai/glm-5.3-flash"
+            "model": "nvidia/z-ai/glm-5.3-flash",
+            "intelligence": "medium"
           }
         ],
         "offPeak": [
           {
-            "model": "commandcode/minimax/minimax-m3.1-flash:free",
-            "effort": "low"
-          },
-          {
-            "model": "ctyun/deepseek-v4-pro-0813-oc"
+            "model": "ctyun/deepseek-v4-pro-0813-oc",
+            "intelligence": "medium"
           },
           {
             "model": "google-antigravity/gemini-3.8-flash",
-            "tier": ["pro", "ultra"]
+            "tier": [
+              "pro",
+              "ultra"
+            ],
+            "intelligence": "medium"
           },
           {
-            "model": "qoder-cn/qwen3.8-flash"
+            "model": "qoder-cn/qwen3.8-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "charm-hyper/qwen3.8-flash"
+            "model": "charm-hyper/qwen3.8-flash",
+            "intelligence": "medium"
           },
           {
-            "model": "nvidia/z-ai/glm-5.3-flash"
+            "model": "nvidia/z-ai/glm-5.3-flash",
+            "intelligence": "medium"
           }
         ]
       }
     },
     "vision": {
       "displayName": "Lazy · vision",
-      "input": ["text", "image"],
+      "input": [
+        "text",
+        "image"
+      ],
       "derive": {
         "from": "task"
       }
     }
   },
   "modelTraits": {
-    "commandcode/minimax/minimax-m3.1-flash:free": {
-      "$comment": "The commandcode plugin catalog marks this model as non-reasoning and drops reasoning_effort, yet /alpha/generate always thinks and honours params.reasoning_effort (low/medium/high accepted, minimal answered 400). The attempt layer writes the effort into the provider body (upstream-effort.js).",
-      "reasoning": true,
-      "efforts": ["low", "medium", "high"]
-    },
     "qoder-cn/qwen3.8-flash": {
       "$comment": "The registry advertises minimal..high, but the qoder-cn plugin only accepts low/medium/xhigh upstream and rounds other levels UP (high -> xhigh). Levels both accept:",
-      "efforts": ["low", "medium"]
+      "efforts": [
+        "low",
+        "medium"
+      ]
     }
   },
   "peakWindows": [

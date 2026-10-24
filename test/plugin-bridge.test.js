@@ -97,7 +97,7 @@ describe("registry hooks", () => {
       await registry.refresh();
       expect(registered.length).toBeGreaterThanOrEqual(2);
       expect(syncWraps).toBe(1);
-      expect([...registry.syncExtensionSources(new Set(["x"]))].sort()).toEqual(["omp-shims:fake-plugin", "x"]);
+      expect([...registry.syncExtensionSources(new Set(["x"]))].sort()).toEqual(["omp-shims:fake-plugin", "omp-shims:internal", "x"]);
       expect(lines.filter((line) => line.startsWith("plugin-bridge: registered fake "))).toHaveLength(1);
     } finally {
       globalThis.__OMP_SHIMS_HOST__ = previousHost;

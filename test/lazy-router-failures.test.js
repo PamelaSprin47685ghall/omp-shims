@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CLIENT_CLOSED_STATUS, classifyFailure, FAILURE } from "../lib/lazy-router/failures.js";
+import { CLIENT_CLOSED_STATUS, classifyFailure, FAILURE, requestContextRequirement } from "../lib/lazy-router/failures.js";
 
 const outcome = (verdict, upstreamContacted = true) => ({ verdict: { ok: false, ...verdict }, upstreamContacted });
 const aborted = () => {
@@ -39,6 +39,7 @@ describe("classifyFailure", () => {
       "[Qoder CN 额度限制] 今日调用次数已达上限 (Billing daily count exceeded, 错误码 110)",
       '{"error":{"code":"insufficient_quota"}}',
       "You exceeded your current quota, please check your plan",
+      "User Provided API Key Rate Limit Exceeded",
     ]) {
       expect(classifyFailure(outcome({ status: 502, source: "gateway", message }))).toBe(FAILURE.QUOTA);
     }
@@ -49,5 +50,59 @@ describe("classifyFailure", () => {
       FAILURE.UNIT,
     );
     expect(classifyFailure(outcome({ status: 503, source: "upstream", message: "overloaded" }))).toBe(FAILURE.UNIT);
+  });
+
+  test("qoder's reformatted quota codes cool the unit without a probe", () => {
+    for (const message of [
+      "[Qoder quota limit] Daily call allowance exhausted (Billing daily count exceeded, code 110)",
+      "[Qoder enterprise quota] The organization's credit pool is exhausted (code 116)",
+      "[Qoder model free tier] This model's free daily trial allowance is used up (code 119)",
+    ]) {
+      expect(classifyFailure(outcome({ status: 429, source: "upstream", message }))).toBe(FAILURE.QUOTA);
+    }
+  });
+
+  test("a provider plugin crash cools the unit instead of probing it again", () => {
+    for (const message of [
+      "undefined is not an object (evaluating 'e.content.length')",
+      'No transport registered for api "openai-responses". The provider plugin must be loaded before streaming.',
+    ]) {
+      expect(classifyFailure(outcome({ status: 502, source: "stream", message }))).toBe(FAILURE.QUOTA);
+    }
+  });
+
+  test("bad-request semantics belong to the request, even when a plugin wraps upstream 400 as stream 502", () => {
+    expect(
+      classifyFailure(outcome({
+        status: 400,
+        source: "upstream",
+        message: 'The input token count exceeds the maximum number of tokens allowed (1048576).',
+      })),
+    ).toBe(FAILURE.REQUEST);
+    expect(
+      classifyFailure(outcome({
+        status: 502,
+        source: "stream",
+        message: 'Upstream status 400: {"code":"provider_error","details":"invalid_parameter_error"}',
+      })),
+    ).toBe(FAILURE.REQUEST);
+    expect(
+      classifyFailure(outcome({
+        status: 400,
+        source: "upstream",
+        message: '{"error":{"type":"invalid_request_error","message":"Invalid input. Please review your request before trying again."}}',
+      })),
+    ).toBe(FAILURE.REQUEST);
+  });
+
+  test("context rejections expose the minimum window a later model must clear", () => {
+    expect(requestContextRequirement("The input token count exceeds the maximum number of tokens allowed (1048576)."))
+      .toBe(1048577);
+    expect(
+      requestContextRequirement(
+        "This model's maximum context length is 1048576 tokens. However, your messages resulted in 2275691 tokens.",
+      ),
+    ).toBe(2275691);
+    expect(requestContextRequirement("invalid_parameter_error")).toBe(0);
   });
 });

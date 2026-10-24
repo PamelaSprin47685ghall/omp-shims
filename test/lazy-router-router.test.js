@@ -147,6 +147,7 @@ function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
     faults: new FaultInjector(faults),
     emit,
     settings: {
+      routing: { temperature: 0 },
       probePrompt: "Reply OK",
       probeMaxTokens: 32,
       probeTimeoutMs: 2_000,
@@ -371,6 +372,80 @@ describe("LazyRouter", () => {
     const response = await h.send({ messages: "not-a-list" });
     expect(response.status).toBe(400);
     expect(h.calls).toHaveLength(0);
+    expect(h.names()).not.toContain("cooldown-enter");
+  });
+
+  test("Cloud Code empty-contents 400 is a request rejection, not an unhealthy account", async () => {
+    const invalidContents = () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 400,
+            message: "* GenerateContentRequest.contents: contents is not specified\n",
+            status: "INVALID_ARGUMENT",
+          },
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    const h = harness({ upstream: invalidContents });
+    const response = await h.send({});
+    expect(response.status).toBe(400);
+    expect(h.calls).toHaveLength(1);
+    expect(h.names()).toEqual(["route", "rejected"]);
+    expect(h.names()).not.toContain("probe");
+    expect(h.names()).not.toContain("cooldown-enter");
+    expect(h.health.isAlive("p/1 p/big")).toBe(true);
+  });
+
+  test("a provider 400 is request-scoped: skip duplicate accounts, do not probe/cool, and try another model", async () => {
+    const invalid = () => new Response(
+      JSON.stringify({ error: { message: "Invalid input. Please review your request before trying again.", type: "invalid_request_error" } }),
+      { status: 400 },
+    );
+    const h = harness({ upstream: (call) => (call.body.model === "p/big" ? invalid() : ok()) });
+    const response = await h.send({});
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("q");
+    expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#1", "q"]);
+    expect(h.events.filter((e) => e.event === "attempt-failed").map((e) => e.failure)).toEqual(["request"]);
+    expect(h.names()).not.toContain("probe");
+    expect(h.names()).not.toContain("cooldown-enter");
+    expect(h.health.isAlive("p/1 p/big")).toBe(true);
+  });
+
+  test("a context-limit 400 skips models whose advertised window cannot clear the discovered requirement", async () => {
+    const tooLong = () => new Response(
+      JSON.stringify({ error: { message: "The input token count exceeds the maximum number of tokens allowed (1048576)." } }),
+      { status: 400 },
+    );
+    const h = harness({ upstream: (call) => (call.body.model === "p/big" ? tooLong() : ok()) });
+    const response = await h.send({});
+    expect(response.status).toBe(400);
+    expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#1"]);
+    expect(h.names()).toEqual(["route", "attempt-failed", "skip", "exhausted"]);
+    expect(h.names()).not.toContain("probe");
+    expect(h.names()).not.toContain("cooldown-enter");
+    const body = await response.json();
+    expect(body.error.type).toBe("invalid_request_error");
+    expect(body.error.message).toContain("1048576");
+  });
+
+  test("a stream 502 wrapping upstream invalid_parameter_error is restored to request semantics", async () => {
+    const h = harness({
+      upstream: ok,
+      bypass: (body) =>
+        body.model === "p/big"
+          ? { error: { message: 'Upstream status 400: {"code":"provider_error","details":"invalid_parameter_error"}' } }
+          : { choices: [{ delta: { content: "OK" } }] },
+    });
+    const response = await h.send({ stream: true });
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("q");
+    expect(h.events.filter((e) => e.event === "route").map((e) => e.unit)).toEqual(["p:gold#1", "q"]);
+    expect(h.events.filter((e) => e.event === "attempt-failed").map((e) => [e.failure, e.status, e.source])).toEqual([
+      ["request", 502, "stream"],
+    ]);
+    expect(h.names()).not.toContain("probe");
     expect(h.names()).not.toContain("cooldown-enter");
   });
 

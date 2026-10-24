@@ -4,7 +4,7 @@ import { Attempt, createAttemptLayer } from "../lib/lazy-router/attempt.js";
 import { withUpstreamEffort } from "../lib/lazy-router/upstream-effort.js";
 
 const generateBody = (params = {}) =>
-  JSON.stringify({ config: { workingDir: "/tmp" }, params: { model: "minimax/minimax-m3.1-flash:free", ...params } });
+  JSON.stringify({ config: { workingDir: "/tmp" }, params: { model: "reflection/beam:free", ...params } });
 
 describe("withUpstreamEffort", () => {
   test("commandcode: writes params.reasoning_effort", () => {
@@ -36,7 +36,7 @@ describe("attempt layer", () => {
 
   async function send(effort) {
     const layer = createAttemptLayer({ credentials });
-    const attempt = new Attempt({ unit, model: "commandcode/minimax/minimax-m3.1-flash:free", effort });
+    const attempt = new Attempt({ unit, model: "commandcode/reflection/beam:free", effort });
     let seen;
     await runPinned(attempt, () =>
       layer(
