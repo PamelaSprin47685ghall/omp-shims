@@ -246,6 +246,57 @@ providers:
     expect(snap.credentials.some((c) => c.provider === "built-in")).toBe(true);
   });
 
+  test("excludeProviders keeps cloud-synced self providers out of the local gateway registry", async () => {
+    const modelsFile = join(dir, "models-self.yml");
+    writeFileSync(
+      modelsFile,
+      [
+        "providers:",
+        "  kw92.cyou:",
+        "    baseUrl: https://ai.kw92.cyou:20000/v1",
+        "    apiKey: local-proxy-token",
+        "    api: openai-completions",
+        "    models:",
+        "      - id: mistral-vibe/zai-glm-5-3-flash",
+        "  external-proxy:",
+        "    baseUrl: https://external.example/v1",
+        "    apiKey: external-token",
+        "    api: openai-completions",
+        "    models:",
+        "      - id: external/model",
+        "",
+      ].join("\n"),
+    );
+
+    const registered = [];
+    const configKeys = new Map();
+    class FakeModelRegistry {
+      constructor() {
+        this.authStorage = {
+          keys: { setConfig: (provider, token) => configKeys.set(provider, token) },
+          credentials: { snapshot: () => ({ generation: 1, generatedAt: Date.now(), credentials: [] }) },
+        };
+      }
+      registerProvider(name) { registered.push(name); }
+      async refresh() {}
+      getAll() { return []; }
+    }
+    globalThis.__OMP_SHIMS_HOST__ = {
+      captured: new Map([["ModelRegistry", FakeModelRegistry]]),
+      observe: () => {},
+    };
+    const lines = [];
+    install({ modelsPath: modelsFile, excludeProviders: ["kw92.cyou"] }, { log: (line) => lines.push(line) });
+    const registry = new FakeModelRegistry();
+    await registry.refresh();
+
+    expect(registered).toEqual(["external-proxy"]);
+    expect(configKeys.has("kw92.cyou")).toBe(false);
+    expect(configKeys.get("external-proxy")).toBe("external-token");
+    expect(registry.authStorage.credentials.snapshot().credentials.map((entry) => entry.provider)).toEqual(["external-proxy"]);
+    expect(lines.some((line) => line.includes("skipped local provider kw92.cyou"))).toBe(true);
+  });
+
   test("getAll registers once per registry; refresh re-registers; the sync hook is not stacked", async () => {
     const modelsFile = join(dir, "models-once.yml");
     writeFileSync(

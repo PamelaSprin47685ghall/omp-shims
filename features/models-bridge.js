@@ -166,6 +166,11 @@ export function install(config, context) {
   const log = context.log ?? (() => {});
   const configuredPath = config?.modelsPath ?? process.env.OMP_SHIMS_MODELS_PATH;
 
+  const excludedProviders = new Set(
+    Array.isArray(config?.excludeProviders)
+      ? config.excludeProviders.filter((name) => typeof name === "string" && name.trim()).map((name) => name.trim())
+      : [],
+  );
   const registeredProviders = new Set();
   const tokens = new Map();
   /** Registries that already hold the custom providers. */
@@ -191,7 +196,11 @@ export function install(config, context) {
         return;
       }
 
-      const customProviders = extractCustomProviders(parsedDoc);
+      const customProviders = extractCustomProviders(parsedDoc).filter(({ name }) => {
+        if (!excludedProviders.has(name)) return true;
+        log(`models-bridge: skipped local provider ${name} (excluded by config)`);
+        return false;
+      });
       if (customProviders.length === 0) {
         log(`models-bridge: no custom providers with models found in ${modelsFile}`);
         return;

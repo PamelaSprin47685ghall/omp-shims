@@ -191,6 +191,7 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | | | `OMP_SHIMS_TRAFFIC_LOG_BODY=0` omits bodies | bodies logged |
 | `plugin-bridge` | `pluginsDir`, `plugins` (allow-list) | | `~/.omp/plugins`, all |
 | `models-bridge` | `modelsPath` | `OMP_SHIMS_MODELS_PATH` | `~/.omp/agent/models.yml` |
+| `models-bridge` | `excludeProviders` | — | `[]` (providers present in synced models.yml but intentionally not registered on this host) |
 | `vendor-shims` | `pluginsDir` | `OMP_SHIMS_VENDOR_SKIP=1` skips it | `~/.omp/plugins` |
 | `lazy-router` | `routesFile`, `holidaysFile` | | bundled `lib/lazy-router/*.json` |
 | | `probeIntervalMs`, `probeTimeoutMs` | | `1800000`, `90000` |
