@@ -1,5 +1,8 @@
 import { withUsageRequest } from "../lib/inbound.js";
 import { describe, expect, test } from "bun:test";
+import { statSync } from "node:fs";
+import { join } from "node:path";
+import { tempDir } from "./helpers.js";
 import {
   mayCarryUsage,
   measureStream,
@@ -125,6 +128,47 @@ describe("ModelPerf", () => {
     expect(perf.view()["p/a"].ttftMs).toBe(500);
     expect(perf.view()["p/a"].samples).toBe(1);
   });
+  test("persists the rolling window across a restart with private state-file permissions", () => {
+    let clock = 12_000_000;
+    const statePath = join(tempDir("omp-perf-state-"), "perf.json");
+    const first = new ModelPerf({ now: () => clock, statePath });
+    first.record("p/a", { ttftMs: 400, outputTokens: 20, generationMs: 1_000, totalMs: 2_000 }, "peak");
+    first.record("p/a", { totalMs: 9_000 }, "offPeak");
+
+    const second = new ModelPerf({ now: () => clock, statePath });
+    expect(second.view("peak")["p/a"]).toMatchObject({ ttftMs: 400, totalMs: 2_000, samples: 1 });
+    expect(second.view("offPeak")["p/a"]).toMatchObject({ totalMs: 9_000, samples: 1 });
+    expect(statSync(statePath).mode & 0o777).toBe(0o600);
+  });
+
+  test("expired live data becomes only a weak historical prior, and one fresh sample replaces it", () => {
+    let clock = 20_000_000;
+    const statePath = join(tempDir("omp-perf-history-"), "perf.json");
+    const perf = new ModelPerf({ now: () => clock, statePath });
+    perf.record("p/a", { totalMs: 20_000 }, "peak");
+    clock += PERF_WINDOW_MINUTES * 60_000 + 1_000;
+
+    expect(perf.view("peak")["p/a"]).toBeUndefined();
+    expect(perf.routingView("peak")["p/a"]).toMatchObject({ totalMs: 20_000, samples: 0, historical: true });
+    expect(perf.routingView("offPeak")["p/a"]).toBeUndefined();
+
+    perf.record("p/a", { totalMs: 1_000 }, "peak");
+    const fresh = perf.routingView("peak")["p/a"];
+    expect(fresh.totalMs).toBe(1_000);
+    expect(fresh.samples).toBe(1);
+    expect(fresh.historical).toBeUndefined();
+  });
+
+  test("historical evidence decays and imputed aborts never become historical facts", () => {
+    let clock = 30_000_000;
+    const perf = new ModelPerf({ now: () => clock, historyHalfLifeMs: 1_000 });
+    perf.record("p/real", { totalMs: 4_000 }, "peak");
+    perf.record("p/imputed", { totalMs: 8_000, imputed: true }, "peak");
+    clock += PERF_WINDOW_MINUTES * 60_000 + 1;
+    expect(perf.routingView("peak")["p/imputed"]).toBeUndefined();
+    expect(perf.routingView("peak")["p/real"]).toBeUndefined();
+  });
+
 });
 
 describe("measureStream", () => {

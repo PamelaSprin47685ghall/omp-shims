@@ -59,6 +59,7 @@ import { createEventLog, summarizeUpstreamBody } from "../lib/lazy-router/events
 import { FaultInjector } from "../lib/lazy-router/faults.js";
 import { formatForPath } from "../lib/lazy-router/formats.js";
 import { HealthRegistry } from "../lib/lazy-router/health.js";
+import { ModelPerf } from "../lib/lazy-router/perf.js";
 import { loadPolicyData, RoutePolicy } from "../lib/lazy-router/policy.js";
 import { LazyRouter } from "../lib/lazy-router/router.js";
 import { createStatusPage } from "../lib/lazy-router/status-page.js";
@@ -114,6 +115,11 @@ export function createLazyRouter(config, { log = report } = {}) {
   const dispatcher = new GatewayDispatcher({ tokenPath, headerTimeoutMs: config.headerTimeoutMs });
   const faults = new FaultInjector(config.testFaults ?? {});
   if (faults.active) log("lazy-router: TEST FAULTS ACTIVE — never use this config in production", config.testFaults);
+  const perf = new ModelPerf({
+    statePath: config.perfStatePath ?? process.env.OMP_SHIMS_LAZY_PERF_STATE_PATH ?? join(ompDir, "lazy-router-perf.json"),
+    ...(config.perfHistoryHalfLifeMs ? { historyHalfLifeMs: config.perfHistoryHalfLifeMs } : {}),
+    ...(config.perfHistoryWeightCap ? { historyWeightCap: config.perfHistoryWeightCap } : {}),
+  });
 
   const router = new LazyRouter({
     policy,
@@ -130,6 +136,7 @@ export function createLazyRouter(config, { log = report } = {}) {
     }),
     capacity: new InFlightTracker({ limitOf: (unit) => policy.maxInFlight(unit) }),
     admission: new AdmissionControl({ windowMs: config.admissionWindowMs }),
+    perf,
     credentials,
     emit,
     settings: {

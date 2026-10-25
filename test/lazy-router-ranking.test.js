@@ -13,6 +13,18 @@ describe("Glicko-like Thompson routing", () => {
     expect(r.latencyMs).toBeNull();
   });
 
+  test("fresh population latency ignores historical-only models; history is fallback only when all data is old", () => {
+    expect(populationLatencyMs({
+      fresh: { totalMs: 9_000, samples: 2 },
+      oldFast: { totalMs: 1_000, historical: true },
+      oldSlow: { totalMs: 2_000, historical: true },
+    })).toBe(9_000);
+    expect(populationLatencyMs({
+      oldFast: { totalMs: 1_000, historical: true },
+      oldSlow: { totalMs: 3_000, historical: true },
+    })).toBe(2_000);
+  });
+
   test("observed latency is rated by ratio to the current population", () => {
     const c = candidate("p/a", "medium");
     const fast = routingRating(c, { totalMs: 3000, samples: 10 }, 0, { latencyWeight: 1 }, 9000);
@@ -34,6 +46,28 @@ describe("Glicko-like Thompson routing", () => {
     expect(ranked[0].candidate.model).toBe("p/unknown");
     expect(ranked.find((x) => x.candidate.model === "p/unknown").routing.rd)
       .toBeGreaterThan(ranked.find((x) => x.candidate.model === "p/known").routing.rd);
+  });
+
+  test("historical latency is only a quarter-strength prior and keeps cold-start uncertainty wide", () => {
+    const c = candidate("p/a", "medium");
+    const fresh = routingRating(c, { totalMs: 3_000, samples: 1 }, 0, { latencyWeight: 1, historicalLatencyWeight: 0.25 }, 9_000);
+    const history = routingRating(
+      c,
+      { totalMs: 3_000, samples: 0, historical: true, historicalStrength: 1 },
+      0,
+      { latencyWeight: 1, historicalLatencyWeight: 0.25 },
+      9_000,
+    );
+    expect(history.latencyRating).toBeCloseTo(fresh.latencyRating * 0.25, 8);
+    expect(history.historical).toBe(true);
+    expect(history.rd).toBeGreaterThan(fresh.rd);
+  });
+
+  test("stale historical strength fades the already-weak latency prior", () => {
+    const c = candidate("p/a", "medium");
+    const full = routingRating(c, { totalMs: 18_000, samples: 0, historical: true, historicalStrength: 1 }, 0, {}, 9_000);
+    const faded = routingRating(c, { totalMs: 18_000, samples: 0, historical: true, historicalStrength: 0.25 }, 0, {}, 9_000);
+    expect(Math.abs(faded.latencyRating)).toBeCloseTo(Math.abs(full.latencyRating) * 0.25, 8);
   });
 
   test("duplicate accounts share one posterior draw per model", () => {
