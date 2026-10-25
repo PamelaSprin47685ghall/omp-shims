@@ -60,10 +60,6 @@
           {
             "model": "ctyun/deepseek-v4-pro-0813-oc",
             "intelligence": "medium"
-          },
-          {
-            "model": "nvidia/z-ai/glm-5.3-flash",
-            "intelligence": "medium"
           }
         ],
         "offPeak": [
@@ -103,10 +99,6 @@
           {
             "model": "ctyun/deepseek-v4-pro-0813-oc",
             "intelligence": "medium"
-          },
-          {
-            "model": "nvidia/z-ai/glm-5.3-flash",
-            "intelligence": "medium"
           }
         ],
         "offPeak": [
@@ -128,10 +120,6 @@
           },
           {
             "model": "charm-hyper/qwen3.8-flash",
-            "intelligence": "medium"
-          },
-          {
-            "model": "nvidia/z-ai/glm-5.3-flash",
             "intelligence": "medium"
           }
         ]

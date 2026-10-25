@@ -54,7 +54,6 @@ describe("bundled route tables", () => {
       "qoder-cn qoder-cn/qwen3.8-flash",
       "charm-hyper charm-hyper/qwen3.8-flash",
       "ctyun ctyun/deepseek-v4-pro-0813-oc",
-      "nvidia nvidia/z-ai/glm-5.3-flash",
     ]);
   });
 
