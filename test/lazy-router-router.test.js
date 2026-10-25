@@ -224,6 +224,19 @@ describe("LazyRouter", () => {
     expect(h.names().at(-1)).toBe("exhausted");
   });
 
+  test("a failed background probe stays quiet while remaining scheduled", async () => {
+    const h = harness({ upstream: (call) => (call.unit === "p:gold#1" ? quota() : ok()) });
+    await h.send({});
+    expect(h.health.isAlive("p/1 p/big")).toBe(false);
+    const beforeEvents = h.names().length;
+    const beforeTimers = h.timers.length;
+    await h.timers[0]();
+    expect(h.names().slice(beforeEvents)).toEqual([]);
+    expect(h.health.isAlive("p/1 p/big")).toBe(false);
+    expect(h.timers.length).toBe(beforeTimers + 1);
+    expect(h.health.entry("p/1 p/big")?.probes).toBe(1);
+  });
+
   test("a background probe restores the unit and traffic returns to it", async () => {
     let healthy = false;
     const h = harness({ upstream: (call) => (call.unit !== "p:gold#1" || healthy ? ok() : quota()) });
