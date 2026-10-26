@@ -60,6 +60,10 @@
           {
             "model": "ctyun/deepseek-v4-pro-0813-oc",
             "intelligence": "medium"
+          },
+          {
+            "model": "ctyun/glm-5.3-oc",
+            "intelligence": "medium"
           }
         ],
         "offPeak": [
@@ -99,11 +103,19 @@
           {
             "model": "ctyun/deepseek-v4-pro-0813-oc",
             "intelligence": "medium"
+          },
+          {
+            "model": "ctyun/glm-5.3-oc",
+            "intelligence": "medium"
           }
         ],
         "offPeak": [
           {
             "model": "ctyun/deepseek-v4-pro-0813-oc",
+            "intelligence": "medium"
+          },
+          {
+            "model": "ctyun/glm-5.3-oc",
             "intelligence": "medium"
           },
           {

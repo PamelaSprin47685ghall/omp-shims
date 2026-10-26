@@ -54,6 +54,7 @@ describe("bundled route tables", () => {
       "qoder-cn qoder-cn/qwen3.8-flash",
       "charm-hyper charm-hyper/qwen3.8-flash",
       "ctyun ctyun/deepseek-v4-pro-0813-oc",
+      "ctyun ctyun/glm-5.3-oc",
     ]);
   });
 
@@ -80,8 +81,9 @@ describe("bundled route tables", () => {
       "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
       "qoder-cn qoder-cn/qwen3.8-flash",
     ]);
-    expect(order("task", PERIOD.OFF_PEAK).slice(0, 2)).toEqual([
+    expect(order("task", PERIOD.OFF_PEAK).slice(0, 3)).toEqual([
       "ctyun ctyun/deepseek-v4-pro-0813-oc",
+      "ctyun ctyun/glm-5.3-oc",
       "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
     ]);
   });
