@@ -43,10 +43,10 @@ describe("bundled route tables", () => {
 
   test("peak default follows the priority list, tiers in the listed order, accounts oldest first", () => {
     expect(order("default", PERIOD.PEAK)).toEqual([
-      "openai-codex:plus#1 openai-codex/gpt-6.1-sol",
+      "openai-codex:plus#1 openai-codex/gpt-6.1-terra",
       "kiro kiro/claude-opus-5-5",
       "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
-      "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
+      "openai-codex:pro#1 openai-codex/gpt-6.1-terra",
       "mistral-vibe mistral-vibe/zai-glm-5-3-flash",
       "ollama-cloud ollama-cloud/glm-5.3-flash",
       "cline-pass#1 cline-pass/glm-5.3-flash",
@@ -159,9 +159,9 @@ describe("runtime expansion", () => {
       line.startsWith("openai-codex"),
     );
     expect(codex).toEqual([
-      "openai-codex:plus#1 openai-codex/gpt-6.1-sol",
-      "openai-codex:plus#2 openai-codex/gpt-6.1-sol",
-      "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
+      "openai-codex:plus#1 openai-codex/gpt-6.1-terra",
+      "openai-codex:plus#2 openai-codex/gpt-6.1-terra",
+      "openai-codex:pro#1 openai-codex/gpt-6.1-terra",
     ]);
   });
 
