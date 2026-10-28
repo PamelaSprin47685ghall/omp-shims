@@ -154,6 +154,43 @@
         ]
       }
     },
+    "weak": {
+      "displayName": "Lazy · weak",
+      "contextWindow": 250000,
+      "maxOutputTokens": 32768,
+      "input": [
+        "text"
+      ],
+      "periods": {
+        "peak": [
+          {
+            "model": "commandcode/poolside/laguna-s-2.1-free",
+            "effort": "high",
+            "intelligence": "medium"
+          },
+          {
+            "model": "commandcode/stealth/glyph-cluster:free",
+            "effort": "high",
+            "intelligence": "medium"
+          },
+          {
+            "model": "mistral-vibe/mistral-small-latest",
+            "effort": "high",
+            "intelligence": "medium"
+          },
+          {
+            "model": "opencode-go/iceman-contributor-free",
+            "effort": "high",
+            "intelligence": "medium"
+          }
+        ],
+        "offPeak": [
+          {
+            "sameAs": "peak"
+          }
+        ]
+      }
+    },
     "vision": {
       "displayName": "Lazy · vision",
       "input": [

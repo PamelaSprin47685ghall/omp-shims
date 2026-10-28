@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { lazyRouterHandler } from "../features/lazy-router.js";
 import { describeStatus, relative } from "../lib/lazy-router/status-page/view.js";
+import { LABELS } from "../lib/lazy-router/status-page/labels.js";
 import { ASSET_PREFIX, CONTENT_SECURITY_POLICY, escapeHtml, renderStatusPage } from "../lib/lazy-router/status-page.js";
 
 const STATUS_PATH = "/v1/lazy/status";
@@ -123,6 +124,12 @@ describe("public paths", () => {
     ];
     for (const [method, path] of others) expect((await send(method, path)).status).toBe(401);
     expect(gatewayCalls).toHaveLength(others.length);
+  });
+});
+
+describe("route labels", () => {
+  test("weak has a stable Chinese status-page label", () => {
+    expect(LABELS.routes.weak).toBe("弱档");
   });
 });
 

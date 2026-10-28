@@ -90,6 +90,21 @@ describe("bundled route tables", () => {
     ]);
   });
 
+  test("weak contains only the four 250k-plus weak models", () => {
+    const expected = [
+      "commandcode commandcode/poolside/laguna-s-2.1-free",
+      "commandcode commandcode/stealth/glyph-cluster:free",
+      "mistral-vibe mistral-vibe/mistral-small-latest",
+      "opencode-go opencode-go/iceman-contributor-free",
+    ];
+    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) expect(order("weak", period)).toEqual(expected);
+    expect(policy.inputOf("weak")).toEqual(["text"]);
+    expect(policy.contextWindowOf("weak")).toBe(250000);
+    expect(policy.maxOutputTokensOf("weak")).toBe(32768);
+    expect(policy.contextWindowOf("task")).toBe(500000);
+    expect(policy.maxOutputTokensOf("task")).toBe(64000);
+  });
+
   test("Mistral Vibe is a medium task candidate only through October 2026 and never inherits into vision", () => {
     const active = new Date("2026-10-31T23:59:59+08:00");
     const expired = new Date("2026-11-01T00:00:00+08:00");
@@ -140,6 +155,7 @@ describe("bundled route tables", () => {
 
   test("routeFor accepts only lazy models with a table", () => {
     expect(policy.routeFor("lazy/task")).toBe("task");
+    expect(policy.routeFor("lazy/weak")).toBe("weak");
     expect(policy.routeFor("lazy/nope")).toBeUndefined();
     expect(policy.routeFor("kiro/claude-opus-5-5")).toBeUndefined();
   });
@@ -241,6 +257,14 @@ describe("validation", () => {
     const empty = base();
     empty.routes.r.periods.peak[0].tier = [];
     expect(() => new RoutePolicy(empty)).toThrow(/tier/);
+  });
+
+  test("route-level context and output limits must be positive integers", () => {
+    for (const [field, value] of [["contextWindow", 0], ["contextWindow", 1.5], ["maxOutputTokens", -1]]) {
+      const data = base();
+      data.routes.r[field] = value;
+      expect(() => new RoutePolicy(data)).toThrow(new RegExp(field));
+    }
   });
 
   test("invalid activeUntil timestamps are rejected", () => {

@@ -54,6 +54,16 @@ const CATALOG = {
     canDisable: false,
     baseUrl: "https://ctyun.example/v1",
   },
+  "p/quarter": {
+    ref: "p/quarter",
+    provider: "p",
+    contextWindow: 300_000,
+    input: ["text"],
+    reasoning: false,
+    efforts: [],
+    canDisable: false,
+    baseUrl: "https://q.example/v1",
+  },
   "q/text": {
     ref: "q/text",
     provider: "q",
@@ -581,6 +591,30 @@ describe("LazyRouter", () => {
     expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#1");
     const view = await h.router.status().json();
     expect(view.routes.default.some((row) => row.model === "q/text")).toBe(false);
+  });
+
+  test("a route-specific context/output contract is advertised and used without weakening default", async () => {
+    const policy = {
+      ...POLICY,
+      routes: {
+        ...POLICY.routes,
+        weak: {
+          contextWindow: 250000,
+          maxOutputTokens: 32768,
+          input: ["text"],
+          periods: { peak: [{ model: "p/quarter", tier: "gold" }] },
+        },
+      },
+    };
+    const h = harness({ upstream: ok, policy });
+    const weak = h.router.advertisedModels().find((model) => model.id === "lazy/weak");
+    expect(weak).toMatchObject({ context_length: 250000, max_output_tokens: 32768, input_modalities: ["text"] });
+    const response = await h.send({ model: "lazy/weak", max_tokens: 1 });
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("p/quarter");
+    expect(h.calls.at(-1).body).toMatchObject({ model: "p/quarter", max_completion_tokens: 32768 });
+    const advertisedDefault = h.router.advertisedModels().find((model) => model.id === "lazy/default");
+    expect(advertisedDefault).toMatchObject({ context_length: 500000, max_output_tokens: 64000 });
   });
 
   test("advertised models", () => {

@@ -8,6 +8,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `lazy-router`: add `lazy/weak`, a text-only 250K-context / 32K-output route for Command Code Laguna S, Command Code Glyph Cluster Free, Mistral Small, and OpenCode Iceman Contributor Free.
 - `mistral-vibe`: browser PKCE login, account-scoped dynamic model discovery, and OpenAI-compatible transport for Vibe subscription models, including 1M-context GLM 5.3 Flash and Mistral Large 4.
 - `lazy-router`: `lazy/default`, `lazy/task` and `lazy/vision` virtual models that
   route each request to the first healthy (provider, credential) unit of a
