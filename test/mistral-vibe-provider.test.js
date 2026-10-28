@@ -2,16 +2,133 @@ import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import {
   fetchMistralVibeModels,
+  installMistralVibeResponseAdapter,
   loginMistralVibe,
   MISTRAL_VIBE_API_BASE,
   MISTRAL_VIBE_AUTH_API_BASE,
   MISTRAL_VIBE_MODEL_ID,
   MISTRAL_VIBE_PROVIDER_ID,
   mistralVibeProviderConfig,
+  normalizeMistralVibeSse,
 } from "../lib/mistral-vibe-provider.js";
 
 const reply = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+describe("Mistral Vibe reasoning stream adapter", () => {
+  test("maps structured thinking blocks to reasoning_content without changing text", () => {
+    const input = [
+      'data: {"choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"first "},{"type":"text","text":"second"}]}]},"finish_reason":null}]}',
+      'data: {"choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":null}]}',
+      "data: [DONE]",
+      "",
+    ].join("\n");
+    const output = normalizeMistralVibeSse(input);
+    const lines = output.split("\n");
+    expect(JSON.parse(lines[0].slice(6)).choices[0].delta).toEqual({
+      content: "",
+      reasoning_content: "first second",
+    });
+    expect(lines[1]).toBe('data: {"choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":null}]}');
+    expect(lines[2]).toBe("data: [DONE]");
+  });
+
+  test("flattens text content blocks and leaves unknown structured blocks untouched", () => {
+    const textBlocks = 'data: {"choices":[{"delta":{"role":"assistant","content":[{"type":"text","text":"hello "},{"type":"text","text":"world"}]}}]}';
+    expect(JSON.parse(normalizeMistralVibeSse(textBlocks).slice(6)).choices[0].delta).toEqual({
+      role: "assistant",
+      content: "hello world",
+    });
+    const unknown = 'data: {"choices":[{"delta":{"content":[{"type":"citation","url":"x"}]}}]}';
+    expect(normalizeMistralVibeSse(unknown)).toBe(unknown);
+  });
+
+  test("does not duplicate a canonical reasoning field", () => {
+    const input = 'data: {"choices":[{"delta":{"reasoning_content":"canonical","content":[{"type":"thinking","thinking":[{"type":"text","text":"duplicate"}]}]}}]}';
+    const delta = JSON.parse(normalizeMistralVibeSse(input).slice(6)).choices[0].delta;
+    expect(delta).toEqual({ reasoning_content: "canonical", content: "" });
+  });
+
+  test("rewrites only Mistral chat-completion event streams", async () => {
+    const handlers = [];
+    installMistralVibeResponseAdapter({
+      addFetchHandler: (handler) => handlers.push(handler),
+      preserveResponseUrl: (response) => response,
+    });
+    expect(handlers).toHaveLength(1);
+    const upstream = async () =>
+      new Response(
+        'data: {"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"visible thought"}]}]}}]}\n\n',
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    const response = await handlers[0]("https://api.mistral.ai/v1/chat/completions", {}, upstream);
+    expect(await response.text()).toContain('"reasoning_content":"visible thought"');
+
+    const other = await handlers[0](
+      "https://example.com/v1/chat/completions",
+      {},
+      async () => new Response("untouched"),
+    );
+    expect(await other.text()).toBe("untouched");
+  });
+
+  test("rewrites a reasoning SSE event split across network chunks", async () => {
+    const handlers = [];
+    installMistralVibeResponseAdapter({
+      addFetchHandler: (handler) => handlers.push(handler),
+      preserveResponseUrl: (response) => response,
+    });
+    const event =
+      'data: {"choices":[{"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"split thought"}]}]}}]}\n\n';
+    const bytes = new TextEncoder().encode(event);
+    const upstream = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes.slice(0, 37));
+            controller.enqueue(bytes.slice(37));
+            controller.close();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    const response = await handlers[0]("https://api.mistral.ai/v1/chat/completions", {}, upstream);
+    expect(await response.text()).toContain('"reasoning_content":"split thought"');
+  });
+
+  test("maps structured thinking in non-streaming JSON responses", async () => {
+    const handlers = [];
+    installMistralVibeResponseAdapter({
+      addFetchHandler: (handler) => handlers.push(handler),
+      preserveResponseUrl: (response) => response,
+    });
+    const upstream = async () =>
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                role: "assistant",
+                content: [
+                  { type: "thinking", thinking: [{ type: "text", text: "json thought" }] },
+                  { type: "text", text: "json answer" },
+                ],
+              },
+            },
+          ],
+        }),
+        { headers: { "content-type": "application/json", "content-length": "9999" } },
+      );
+    const response = await handlers[0]("https://api.mistral.ai/v1/chat/completions", {}, upstream);
+    expect(response.headers.get("content-length")).toBeNull();
+    expect((await response.json()).choices[0].message).toEqual({
+      role: "assistant",
+      content: "json answer",
+      reasoning_content: "json thought",
+    });
+  });
+
+});
 
 describe("Mistral Vibe provider", () => {
   test("registers Vibe's current model on the standard Mistral chat transport", () => {

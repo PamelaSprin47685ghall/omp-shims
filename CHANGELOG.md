@@ -103,6 +103,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `mistral-vibe`: preserve Mistral structured `thinking` content blocks by normalizing them to the OpenAI-compatible `reasoning_content` field before OMP parses chat completions, for both SSE and non-streaming JSON responses.
 - `plugin-bridge`: preload async provider plugins before OMP startup and synchronously override built-in providers before the first `ModelRegistry.getAll()`, so Command Code models such as `stealth/glyph-cluster:free` use the plugin `commandcode-custom` transport instead of a stale native provider.
 - `plugin-bridge`: a registry is populated once and again after each `refresh()`,
   instead of on every `getAll()`. The lazy-router catalog now also recognises the

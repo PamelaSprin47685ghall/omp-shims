@@ -21,7 +21,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { activePin } from "../lib/credential-pin.js";
 import { stableIdentityOAuth } from "../lib/oauth-identity.js";
-import { MISTRAL_VIBE_PROVIDER_ID, mistralVibeProviderConfig } from "../lib/mistral-vibe-provider.js";
+import {
+  installMistralVibeResponseAdapter,
+  MISTRAL_VIBE_PROVIDER_ID,
+  mistralVibeProviderConfig,
+} from "../lib/mistral-vibe-provider.js";
 
 const require_ = createRequire(import.meta.url);
 const PLUGIN_SOURCE = "omp-shims";
@@ -277,6 +281,7 @@ function wrapTransportEvents(transport, provider) {
 
 export async function install(config, context) {
   const log = context.log ?? (() => {});
+  installMistralVibeResponseAdapter(context);
   const pluginsDir = config.pluginsDir ?? join(homedir(), ".omp", "plugins");
   // Token specs are provider-agnostic and live outside `features`, so they are
   // merged in from the top-level `pluginBridge` section by the bootstrap.
