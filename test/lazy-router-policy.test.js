@@ -89,6 +89,23 @@ describe("bundled route tables", () => {
     ]);
   });
 
+  test("task advertises a 256K context while default and vision keep the 500K contract", () => {
+    expect(policy.contextWindowOf("task")).toBe(256000);
+    expect(policy.contextWindowOf("default")).toBe(500000);
+    expect(policy.contextWindowOf("vision")).toBe(500000);
+  });
+
+  test("Command Code Laguna S is the low-intelligence tail fallback in both task periods", () => {
+    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
+      const candidates = policy.candidates("task", period, units).candidates;
+      const laguna = candidates.filter((c) => c.model === "commandcode/poolside/laguna-s-2.1-free");
+      expect(laguna).toHaveLength(1);
+      expect(laguna[0].unit.label).toBe("commandcode");
+      expect(laguna[0].intelligence).toBe("low");
+      expect(candidates.at(-1).model).toBe("commandcode/poolside/laguna-s-2.1-free");
+    }
+  });
+
   test("antigravity opus 5.5 is an excellent capped Ultra candidate in every default period", () => {
     for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
       const matches = policy

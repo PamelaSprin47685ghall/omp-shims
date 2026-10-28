@@ -172,6 +172,9 @@ describe("display model", () => {
       ["优秀", "0.400", "0.200", "0.550"],
       ["中等", "-0.200", "0.800", "0.400"],
     ]);
+    const lowRows = rows.map((row, index) => ({ ...row, intelligence: index === 1 ? "low" : row.intelligence }));
+    const [lowView] = describeStatus({ ...STATUS, routes: { ...STATUS.routes, default: lowRows } }).routes;
+    expect(lowView.rows[1].intelligence).toBe("偏低");
   });
 
   test("per-model table is busiest first and reports Bayesian completions", () => {

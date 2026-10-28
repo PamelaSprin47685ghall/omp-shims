@@ -13,6 +13,17 @@ describe("Glicko-like Thompson routing", () => {
     expect(r.latencyMs).toBeNull();
   });
 
+  test("intelligence priors order low below medium below excellent", () => {
+    const low = routingRating(candidate("p/low", "low"), undefined, 0, {}, undefined);
+    const medium = routingRating(candidate("p/medium", "medium"), undefined, 0, {}, undefined);
+    const excellent = routingRating(candidate("p/excellent", "excellent"), undefined, 0, {}, undefined);
+    expect(low.prior).toBe(-0.35);
+    expect(medium.prior).toBe(0);
+    expect(excellent.prior).toBe(0.6);
+    expect(low.rating).toBeLessThan(medium.rating);
+    expect(medium.rating).toBeLessThan(excellent.rating);
+  });
+
   test("fresh population latency ignores historical-only models; history is fallback only when all data is old", () => {
     expect(populationLatencyMs({
       fresh: { totalMs: 9_000, samples: 2 },
