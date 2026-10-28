@@ -54,16 +54,6 @@ const CATALOG = {
     canDisable: false,
     baseUrl: "https://ctyun.example/v1",
   },
-  "q/small": {
-    ref: "q/small",
-    provider: "q",
-    contextWindow: 256_000,
-    input: ["text"],
-    reasoning: false,
-    efforts: [],
-    canDisable: false,
-    baseUrl: "https://q.example/v1",
-  },
   "q/text": {
     ref: "q/text",
     provider: "q",
@@ -566,26 +556,6 @@ describe("LazyRouter", () => {
     expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#2");
     expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#2"]);
     expect(h.events.find((e) => e.event === "attempt-failed").source).toBe("injected");
-  });
-
-  test("a route-specific 256K contract admits a 256K model without weakening other routes", async () => {
-    const routePolicy = {
-      ...POLICY,
-      routes: {
-        ...POLICY.routes,
-        default: {
-          ...POLICY.routes.default,
-          contextWindow: 256000,
-          periods: { peak: [{ model: "q/small" }] },
-        },
-      },
-    };
-    const h = harness({ upstream: ok, policy: routePolicy });
-    const response = await h.send({});
-    expect(response.status).toBe(200);
-    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("q");
-    expect(h.router.advertisedModels().find((m) => m.id === "lazy/default")?.context_length).toBe(256000);
-    expect(h.router.advertisedModels().find((m) => m.id === "lazy/vision")?.context_length).toBe(500000);
   });
 
   test("advertised models", () => {

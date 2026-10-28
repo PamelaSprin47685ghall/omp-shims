@@ -114,10 +114,6 @@
           {
             "model": "ctyun/glm-5.3-oc",
             "intelligence": "medium"
-          },
-          {
-            "model": "commandcode/poolside/laguna-s-2.1-free",
-            "intelligence": "low"
           }
         ],
         "offPeak": [
@@ -144,14 +140,9 @@
           {
             "model": "charm-hyper/qwen3.8-flash",
             "intelligence": "medium"
-          },
-          {
-            "model": "commandcode/poolside/laguna-s-2.1-free",
-            "intelligence": "low"
           }
         ]
-      },
-      "contextWindow": 256000
+      }
     },
     "vision": {
       "displayName": "Lazy · vision",
