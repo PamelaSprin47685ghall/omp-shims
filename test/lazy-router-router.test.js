@@ -44,6 +44,16 @@ const CATALOG = {
     canDisable: false,
     baseUrl: "https://p.example/v1",
   },
+  "ctyun/text": {
+    ref: "ctyun/text",
+    provider: "ctyun",
+    contextWindow: 1_000_000,
+    input: ["text"],
+    reasoning: false,
+    efforts: [],
+    canDisable: false,
+    baseUrl: "https://ctyun.example/v1",
+  },
   "q/text": {
     ref: "q/text",
     provider: "q",
@@ -257,6 +267,33 @@ describe("LazyRouter", () => {
     const text = await response.text();
     expect(text).toContain('"role":"assistant"');
     expect(text).toContain('"OK"');
+  });
+
+  test("CTYun Coding Plan quota text fails over to the next provider instead of reaching the client", async () => {
+    const policy = {
+      ...POLICY,
+      routes: {
+        default: { input: ["text"], periods: { peak: [{ model: "ctyun/text" }, { model: "q/text" }] } },
+      },
+    };
+    const h = harness({
+      policy,
+      upstream: ok,
+      bypass: (body) =>
+        body.model === "ctyun/text"
+          ? { choices: [{ delta: { content: "您的Coding Plan套餐的额度已用完！\n请等待周期时间刷新" } }] }
+          : { choices: [{ delta: { content: "OK" } }] },
+    });
+    const response = await h.send({ stream: true });
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
+    const text = await response.text();
+    expect(text).toContain("OK");
+    expect(text).not.toContain("周期时间刷新");
+    expect(h.events.find((event) => event.event === "attempt-failed")).toMatchObject({
+      model: "ctyun/text",
+      failure: "quota",
+    });
   });
 
   test("without a provider verdict the first answering event decides, and the pin is reported unverified", async () => {

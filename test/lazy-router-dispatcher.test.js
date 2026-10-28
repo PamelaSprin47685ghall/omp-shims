@@ -92,6 +92,42 @@ describe("GatewayDispatcher SSE guard", () => {
     expect(classifyFailure(outcome)).toBe(FAILURE.QUOTA);
   });
 
+  test("CTYun Coding Plan quota text split across content deltas fails before any prefix can leak", async () => {
+    const ctyunUnit = { key: "ctyun", label: "ctyun", provider: "ctyun" };
+    const { attempt, dispatcher } = dispatcherFor(
+      [
+        'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"您的Coding Plan套餐的额"},"finish_reason":null}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"度已用完！\\n请等待周期时间刷新"},"finish_reason":null}]}\n\n',
+      ],
+      ctyunUnit,
+      "ctyun/glm-5.3-oc",
+    );
+    const outcome = await dispatcher.run(attempt, request(), { format: CHAT });
+    expect(outcome.response).toBeUndefined();
+    expect(outcome.verdict).toMatchObject({ ok: false, status: 502, source: VERDICT_SOURCE.STREAM });
+    expect(outcome.verdict.message).toBe("ctyun coding-plan quota exhausted");
+    expect(classifyFailure(outcome)).toBe(FAILURE.QUOTA);
+  });
+
+  test("CTYun non-streaming 200 quota content is a failure, not a successful answer", async () => {
+    const unit = { key: "ctyun", label: "ctyun", provider: "ctyun" };
+    const attempt = new Attempt({ unit, model: "ctyun/glm-5.3-oc" });
+    const dispatcher = new GatewayDispatcher({ tokenPath: "/nonexistent", headerTimeoutMs: 1_000 });
+    dispatcher.bind(async () => {
+      attempt.contacted = true;
+      attempt.settle({ ok: true, status: 200, source: VERDICT_SOURCE.UPSTREAM });
+      return Response.json({
+        choices: [{ message: { role: "assistant", content: "您的Coding Plan套餐的额度已用完！\n请等待周期时间刷新" } }],
+      });
+    }, null);
+    const outcome = await dispatcher.run(attempt, request(), { format: CHAT });
+    expect(outcome.response).toBeUndefined();
+    expect(outcome.verdict).toMatchObject({ ok: false, status: 502, source: VERDICT_SOURCE.GATEWAY });
+    expect(outcome.verdict.message).toBe("ctyun coding-plan quota exhausted");
+    expect(classifyFailure(outcome)).toBe(FAILURE.QUOTA);
+  });
+
   test("a normal Cline answer sharing the sentinel prefix is replayed byte-for-byte", async () => {
     const clineUnit = { key: "cline/1", label: "cline-pass#1", provider: "cline-pass" };
     const role = 'data: {"choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n';
