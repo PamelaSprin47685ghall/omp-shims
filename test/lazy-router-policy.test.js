@@ -133,8 +133,9 @@ describe("bundled route tables", () => {
 describe("concurrency limits", () => {
   const unit = (provider, tier) => ({ provider, tier, key: provider, label: provider });
 
-  test("only ollama-cloud is limited, three requests per key", () => {
+  test("ollama-cloud and charm-hyper have measured safe limits", () => {
     expect(policy.maxInFlight(unit("ollama-cloud"))).toBe(3);
+    expect(policy.maxInFlight(unit("charm-hyper"))).toBe(2);
     for (const provider of ["cline-pass", "openai-codex", "kiro", "commandcode", "google-antigravity", "nvidia"]) {
       expect(policy.maxInFlight(unit(provider, "pro"))).toBe(0);
     }

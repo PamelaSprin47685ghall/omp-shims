@@ -3,7 +3,8 @@
   "contextWindow": 500000,
   "maxInFlight": {
     "$comment": "Concurrent upstream requests per unit (one per account or key), by 'provider' or 'provider:tier'. Absent or 0 = unlimited. A limited unit takes a request only while it has a free slot and the request is among the best prompt-cache matches it has seen lately (see lib/lazy-router/admission.js).",
-    "ollama-cloud": 3
+    "ollama-cloud": 3,
+    "charm-hyper": 2
   },
   "maxOutputTokens": 64000,
   "routes": {
