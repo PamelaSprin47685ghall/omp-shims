@@ -40,7 +40,7 @@ describe("Glicko-like Thompson routing", () => {
     let i = 0;
     const ranked = rankCandidates([known, unknown], {
       perf: { "p/known": { totalMs: 3000, samples: 50 }, other: { totalMs: 9000, samples: 20 } },
-      settings: { temperature: 1, excellentPrior: 0, mediumPrior: 0, affinityWeight: 0 },
+      settings: { temperature: 1, intelligenceSlope: 0, costWeight: 0, affinityWeight: 0 },
       random: () => draws[i++],
     });
     expect(ranked[0].candidate.model).toBe("p/unknown");
@@ -115,7 +115,7 @@ describe("Glicko-like Thompson routing", () => {
       perf: { "p/warm": { totalMs: 5000, samples: 20 }, "p/cold": { totalMs: 3000, samples: 20 } },
       cachedShare: (c) => c.unit.key === "u1" ? 0.5 : 0,
       cachedBytes: (c) => c.unit.key === "u1" ? 65536 : 0,
-      settings: { temperature: 0.5, excellentPrior: 0, mediumPrior: 0 },
+      settings: { temperature: 0.5, intelligenceSlope: 0, costWeight: 0 },
       random: () => 0.5,
     });
     const warmRow = ranked.find((x) => x.candidate.unit.key === "u1");
@@ -144,7 +144,36 @@ describe("Glicko-like Thompson routing", () => {
       perf: { "p/warm": { totalMs: 9000, samples: 20 }, "p/fast": { totalMs: 1000, samples: 20 } },
       cachedShare: (c) => c.unit.key === "u1" ? 0.5 : 0,
       cachedBytes: (c) => c.unit.key === "u1" ? 8192 : 0,
-      settings: { temperature: 0, excellentPrior: 0, mediumPrior: 0, latencyWeight: 1, affinityWeight: 0.5 },
+      settings: { temperature: 0, intelligenceSlope: 0, costWeight: 0, latencyWeight: 1, affinityWeight: 0.5 },
+    });
+    expect(ranked[0].candidate.model).toBe("p/fast");
+  });
+});
+
+
+describe("continuous intelligence and cost priors", () => {
+  test("ten intelligence points reproduce the old 0.6 prior gap", () => {
+    const base = { model: "p/base", intelligence: 50, cost: 1, unit: unit("base") };
+    const smart = { model: "p/smart", intelligence: 60, cost: 1, unit: unit("smart") };
+    const a = routingRating(base, undefined, 0, { latencyWeight: 0, costWeight: 0 }, 5000);
+    const b = routingRating(smart, undefined, 0, { latencyWeight: 0, costWeight: 0 }, 5000);
+    expect(b.prior - a.prior).toBeCloseTo(0.6, 8);
+  });
+
+  test("relative cost is a weak logarithmic penalty", () => {
+    const cheap = { model: "p/cheap", intelligence: 50, cost: 0.1, unit: unit("cheap") };
+    const costly = { model: "p/costly", intelligence: 50, cost: 1, unit: unit("costly") };
+    const a = routingRating(cheap, undefined, 0, { latencyWeight: 0, intelligenceSlope: 0, costWeight: 0.2 }, 5000, 0, 1);
+    const b = routingRating(costly, undefined, 0, { latencyWeight: 0, intelligenceSlope: 0, costWeight: 0.2 }, 5000, 0, 1);
+    expect(a.costRating - b.costRating).toBeCloseTo(0.2 * Math.log(10), 8);
+  });
+
+  test("a five-times latency gap outweighs a ten-point intelligence edge", () => {
+    const fast = { model: "p/fast", intelligence: 50, cost: 1, unit: unit("fast") };
+    const smartSlow = { model: "p/smart-slow", intelligence: 60, cost: 1, unit: unit("slow") };
+    const ranked = rankCandidates([smartSlow, fast], {
+      perf: { "p/fast": { totalMs: 5000, samples: 20 }, "p/smart-slow": { totalMs: 25000, samples: 20 } },
+      settings: { temperature: 0, costWeight: 0, affinityWeight: 0 },
     });
     expect(ranked[0].candidate.model).toBe("p/fast");
   });

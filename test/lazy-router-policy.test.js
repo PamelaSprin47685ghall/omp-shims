@@ -42,121 +42,102 @@ describe("bundled route tables", () => {
     expect(text).not.toMatch(/@/);
   });
 
-  test("peak default follows the priority list, tiers in the listed order, accounts oldest first", () => {
-    expect(order("default", PERIOD.PEAK)).toEqual([
-      "openai-codex:plus#1 openai-codex/gpt-6.1-terra",
-      "kiro kiro/claude-opus-5-5",
-      "google-antigravity:ultra#1 google-antigravity/claude-opus-5-5",
-      "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
-      "openai-codex:pro#1 openai-codex/gpt-6.1-terra",
+  test("peak and off-peak expose identical candidates; periods are performance regimes only", () => {
+    for (const route of ["lazy/default", "lazy/task", "rush/default", "rush/task", "weak/default", "weak/task"]) {
+      expect(order(route, PERIOD.OFF_PEAK)).toEqual(order(route, PERIOD.PEAK));
+    }
+  });
+
+  test("lazy/default is high-quality production work without Rush-reserved Terra or GLM Flash", () => {
+    const candidates = policy.candidates("lazy/default", PERIOD.PEAK, units, TEST_NOW).candidates;
+    expect(candidates.map((c) => c.model)).toEqual([
+      "google-antigravity/gemini-4-argon",
+      "google-antigravity/claude-opus-5-5",
+      "kiro/claude-opus-5-5",
+      "opencode-go/deepseek-v4.1-flash",
+      "ctyun/glm-5.3-oc",
+      "ctyun/deepseek-v4-pro-0813-oc",
+    ]);
+    expect(candidates.every((c) => typeof c.intelligence === "number" && c.cost > 0)).toBe(true);
+    expect(candidates.some((c) => c.model.includes("gpt-6.1-terra"))).toBe(false);
+    expect(candidates.some((c) => c.model.includes("glm-5.3-flash"))).toBe(false);
+  });
+
+  test("lazy/task uses Gemini Pro, never Ultra, and keeps Rush capacity out of the ordinary pool", () => {
+    const candidates = policy.candidates("lazy/task", PERIOD.PEAK, units, TEST_NOW).candidates;
+    const gemini = candidates.filter((c) => c.model === "google-antigravity/gemini-3.8-flash");
+    expect(gemini.map((c) => c.unit.tier)).toEqual(["pro", "pro", "pro"]);
+    expect(candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
+    expect(candidates.some((c) => c.model === "cline-pass/glm-5.3-flash")).toBe(false);
+    expect(candidates.some((c) => c.model === "ollama-cloud/glm-5.3-flash")).toBe(false);
+  });
+
+  test("Qoder DeepSeek Flash is a temporary zero-cost-like task candidate through October", () => {
+    const active = new Date("2026-10-31T23:59:59+08:00");
+    const expired = new Date("2026-11-01T00:00:00+08:00");
+    const live = policy.candidates("lazy/task", PERIOD.PEAK, units, active).candidates.filter((c) => c.model === "qoder-cn/deepseek-v4-flash");
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({ effort: "max", intelligence: 59, cost: 0.01 });
+    expect(policy.candidates("lazy/task", PERIOD.PEAK, units, expired).candidates.some((c) => c.model === "qoder-cn/deepseek-v4-flash")).toBe(false);
+  });
+
+  test("rush/default is strict Terra medium: Plus first, then Pro", () => {
+    expect(policy.selectionOf("rush/default")).toBe("ordered");
+    const candidates = policy.candidates("rush/default", PERIOD.PEAK, units).candidates;
+    expect(candidates.map((c) => [c.unit.label, c.model, c.effort])).toEqual([
+      ["openai-codex:plus#1", "openai-codex/gpt-6.1-terra", "medium"],
+      ["openai-codex:pro#1", "openai-codex/gpt-6.1-terra", "medium"],
+    ]);
+  });
+
+  test("rush/task and rush/vision are strict Mistral -> Cline -> Ollama GLM Flash lanes", () => {
+    const expected = [
       "mistral-vibe mistral-vibe/zai-glm-5-3-flash",
-      "ollama-cloud ollama-cloud/glm-5.3-flash",
       "cline-pass#1 cline-pass/glm-5.3-flash",
       "cline-pass#2 cline-pass/glm-5.3-flash",
-      "qoder-cn qoder-cn/qwen3.8-flash",
-      "charm-hyper charm-hyper/qwen3.8-flash",
-      "ctyun ctyun/deepseek-v4-pro-0813-oc",
+      "ollama-cloud ollama-cloud/glm-5.3-flash",
+    ];
+    expect(policy.selectionOf("rush/task")).toBe("ordered");
+    expect(order("rush/task", PERIOD.PEAK)).toEqual(expected);
+    const vision = policy.candidates("rush/vision", PERIOD.PEAK, units, TEST_NOW);
+    expect(vision.require).toEqual(["text", "image"]);
+    expect(vision.candidates.map((c) => c.unit.label + " " + c.model)).toEqual(expected);
+    expect(vision.candidates.every((c) => c.effort === "max")).toBe(true);
+  });
+
+  test("weak is an independent coordinator/worker family and does not advertise untested vision", () => {
+    expect(policy.selectionOf("weak/default")).toBe("ordered");
+    expect(order("weak/default", PERIOD.PEAK)).toEqual([
       "ctyun ctyun/glm-5.3-oc",
-    ]);
-  });
-
-  test("off-peak default is opencode-go first, then the whole peak list", () => {
-    const offPeak = order("default", PERIOD.OFF_PEAK);
-    expect(offPeak[0]).toBe("opencode-go opencode-go/deepseek-v4.1-flash");
-    expect(policy.candidates("default", PERIOD.OFF_PEAK, units).candidates[0].intelligence).toBe("excellent");
-    expect(offPeak.slice(1)).toEqual(order("default", PERIOD.PEAK));
-  });
-
-  test("capped entries are exactly the configured excellent front-runners", () => {
-    const capped = policy
-      .candidates("default", PERIOD.PEAK, units)
-      .candidates.filter((c) => c.effort === "capped")
-      .map((c) => c.unit.label);
-    expect(capped).toEqual(["openai-codex:plus#1", "kiro", "google-antigravity:ultra#1", "google-antigravity:ultra#1", "openai-codex:pro#1"]);
-  });
-
-  test("task lists differ by period; gemini-3.8-flash drains Pro accounts before Ultra", () => {
-    expect(order("task", PERIOD.PEAK).slice(0, 5)).toEqual([
-      "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
-      "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
-      "google-antigravity:pro#3 google-antigravity/gemini-3.8-flash",
-      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
-      "mistral-vibe mistral-vibe/zai-glm-5-3-flash",
-    ]);
-    expect(order("task", PERIOD.OFF_PEAK).slice(0, 3)).toEqual([
       "ctyun ctyun/deepseek-v4-pro-0813-oc",
-      "ctyun ctyun/glm-5.3-oc",
-      "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
     ]);
-  });
-
-  test("weak contains only the four 250k-plus weak models", () => {
-    const expected = [
+    expect(order("weak/task", PERIOD.PEAK)).toEqual([
       "commandcode commandcode/poolside/laguna-s-2.1-free",
       "commandcode commandcode/stealth/glyph-cluster:free",
       "mistral-vibe mistral-vibe/mistral-small-latest",
       "opencode-go opencode-go/iceman-contributor-free",
-    ];
-    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) expect(order("weak", period)).toEqual(expected);
-    expect(policy.inputOf("weak")).toEqual(["text"]);
-    expect(policy.contextWindowOf("weak")).toBe(250000);
-    expect(policy.maxOutputTokensOf("weak")).toBe(32768);
-    expect(policy.contextWindowOf("task")).toBe(500000);
-    expect(policy.maxOutputTokensOf("task")).toBe(64000);
+    ]);
+    expect(policy.routeFor("weak/vision")).toBeUndefined();
+    expect(policy.routeFor("lazy/weak")).toBeUndefined();
+    expect(policy.contextWindowOf("weak/task")).toBe(250000);
+    expect(policy.maxOutputTokensOf("weak/task")).toBe(32768);
   });
 
-  test("Mistral Vibe is a medium task candidate only through October 2026 and never inherits into vision", () => {
-    const active = new Date("2026-10-31T23:59:59+08:00");
-    const expired = new Date("2026-11-01T00:00:00+08:00");
-    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
-      const live = policy.candidates("task", period, units, active).candidates.filter((c) => c.model === "mistral-vibe/zai-glm-5-3-flash");
-      expect(live).toHaveLength(1);
-      expect(live[0].intelligence).toBe("medium");
-      expect(policy.candidates("task", period, units, expired).candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
-      expect(policy.candidates("vision", period, units, active).candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
-    }
-  });
-
-  test("antigravity opus 5.5 is an excellent capped Ultra candidate in every default period", () => {
-    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
-      const matches = policy
-        .candidates("default", period, units)
-        .candidates.filter((c) => c.model === "google-antigravity/claude-opus-5-5");
-      expect(matches).toHaveLength(1);
-      expect(matches[0].unit.label).toBe("google-antigravity:ultra#1");
-      expect(matches[0].intelligence).toBe("excellent");
-      expect(matches[0].effort).toBe("capped");
-    }
-  });
-
-  test("gemini-4 is served by Ultra accounts only, in every period", () => {
-    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
-      const tiers = policy
-        .candidates("default", period, units)
-        .candidates.filter((c) => c.model.includes("gemini-4"))
-        .map((c) => c.unit.tier);
-      expect(tiers).toEqual(["ultra"]);
-    }
-  });
-
-  test("vision derives from task, requires image input, and appends durable image fallbacks", () => {
-    const { candidates, require } = policy.candidates("vision", PERIOD.PEAK, units, TEST_NOW);
-    const task = policy
-      .candidates("task", PERIOD.PEAK, units, TEST_NOW)
-      .candidates.filter((c) => c.model !== "mistral-vibe/zai-glm-5-3-flash");
+  test("lazy/vision derives from task, requires images, and appends Argon Ultra as a durable fallback", () => {
+    const { candidates, require } = policy.candidates("lazy/vision", PERIOD.PEAK, units, TEST_NOW);
+    const task = policy.candidates("lazy/task", PERIOD.PEAK, units, TEST_NOW).candidates;
     expect(require).toEqual(["text", "image"]);
     expect(candidates.slice(0, task.length)).toEqual(task);
-    expect(candidates.slice(task.length).map((c) => `${c.unit.label} ${c.model}`)).toEqual([
-      "openai-codex:plus#1 openai-codex/gpt-6.1-terra",
-      "openai-codex:pro#1 openai-codex/gpt-6.1-terra",
-      "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
-    ]);
+    expect(candidates.at(-1)).toMatchObject({ model: "google-antigravity/gemini-4-argon", intelligence: 63.1, effort: "medium" });
+    expect(candidates.at(-1).unit.tier).toBe("ultra");
   });
 
-  test("routeFor accepts only lazy models with a table", () => {
-    expect(policy.routeFor("lazy/task")).toBe("task");
-    expect(policy.routeFor("lazy/weak")).toBe("weak");
-    expect(policy.routeFor("lazy/nope")).toBeUndefined();
+  test("routeFor accepts all configured virtual families and rejects direct/unknown ids", () => {
+    for (const id of ["lazy/default", "lazy/task", "lazy/vision", "rush/default", "rush/task", "rush/vision", "weak/default", "weak/task"]) {
+      expect(policy.routeFor(id)).toBe(id);
+      expect(policy.modelIdOf(id)).toBe(id);
+    }
+    expect(policy.routeFor("weak/vision")).toBeUndefined();
     expect(policy.routeFor("kiro/claude-opus-5-5")).toBeUndefined();
   });
 });
@@ -198,7 +179,7 @@ describe("fixed effort levels", () => {
 
   test("an unknown effort is rejected when the table loads", () => {
     const data = loadPolicyData();
-    data.routes.task.periods.peak = [{ model: "qoder-cn/qwen3.8-flash", effort: "turbo" }];
+    data.routes["lazy/task"].periods.peak = [{ model: "qoder-cn/qwen3.8-flash", effort: "turbo" }];
     expect(() => new RoutePolicy(data).candidates("task", PERIOD.PEAK, units)).toThrow(/unknown effort "turbo"/);
   });
 });
@@ -206,7 +187,7 @@ describe("fixed effort levels", () => {
 describe("runtime expansion", () => {
   test("a newly added account joins its tier without any table change", () => {
     const more = [...ACCOUNTS, { id: 17, provider: "openai-codex", tier: "plus" }];
-    const codex = order("default", PERIOD.PEAK, new UnitDirectory({ tiers: tierSource(more, 2) })).filter((line) =>
+    const codex = order("rush/default", PERIOD.PEAK, new UnitDirectory({ tiers: tierSource(more, 2) })).filter((line) =>
       line.startsWith("openai-codex"),
     );
     expect(codex).toEqual([
@@ -219,25 +200,24 @@ describe("runtime expansion", () => {
   test("an account with an unknown tier is matched only by entries without a tier", () => {
     const unknown = ACCOUNTS.map((a) => (a.id === 9 ? { id: 9, provider: a.provider } : a));
     const directory = new UnitDirectory({ tiers: tierSource(unknown) });
-    expect(order("default", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-4"))).not.toContain(
+    expect(order("lazy/default", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-4"))).not.toContain(
       "google-antigravity#1 google-antigravity/gemini-4-argon",
     );
-    expect(order("task", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-3.8"))).toEqual([
+    expect(order("lazy/task", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-3.8"))).toEqual([
       "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
-      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
     ]);
   });
 
   test("expansions are cached per unit version", () => {
     const tiers = tierSource(ACCOUNTS);
     const directory = new UnitDirectory({ tiers });
-    const first = policy.candidates("default", PERIOD.PEAK, directory).candidates;
-    expect(policy.candidates("default", PERIOD.PEAK, directory).candidates).toBe(first);
+    const first = policy.candidates("rush/default", PERIOD.PEAK, directory).candidates;
+    expect(policy.candidates("rush/default", PERIOD.PEAK, directory).candidates).toBe(first);
     tiers.version = 2;
     tiers.accounts = () => ACCOUNTS.filter((a) => a.id !== 5);
-    const next = order("default", PERIOD.PEAK, directory);
-    expect(next[0]).toBe("kiro kiro/claude-opus-5-5");
+    const next = order("rush/default", PERIOD.PEAK, directory);
+    expect(next[0]).toEndWith(" openai-codex/gpt-6.1-terra");
   });
 });
 

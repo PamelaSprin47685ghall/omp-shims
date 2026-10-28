@@ -1,15 +1,147 @@
 {
-  "$comment": "Lazy-router policy. Each entry is a provider/model plus an optional account 'tier' (a name or an ordered list); it expands at runtime into one unit per enabled account of that provider and tier, oldest account first (see lib/lazy-router/units.js). An entry without 'tier' takes every account of the provider. Effort 'capped' means min(requested, medium), a level such as 'low' means exactly that level, and no effort means high. 'sameAs' splices another period's list. A route with 'derive' reuses another route's lists filtered to the required input modalities. 'modelTraits' corrects registry traits where a provider plugin is stricter than the registry says.",
+  "$comment": "Virtual-model policy. peak/offPeak keep separate performance regimes only; every production route exposes the same candidates in both periods. Ranked routes use continuous intelligence, relative cost, measured latency, affinity and Thompson exploration. Ordered routes are dedicated failover lanes.",
   "contextWindow": 500000,
   "maxInFlight": {
-    "$comment": "Concurrent upstream requests per unit (one per account or key), by 'provider' or 'provider:tier'. Absent or 0 = unlimited. A limited unit takes a request only while it has a free slot and the request is among the best prompt-cache matches it has seen lately (see lib/lazy-router/admission.js).",
+    "$comment": "Concurrent upstream requests per unit; absent/0 = unlimited.",
     "ollama-cloud": 3,
     "charm-hyper": 2
   },
   "maxOutputTokens": 64000,
   "routes": {
-    "default": {
-      "displayName": "Lazy · main session",
+    "lazy/default": {
+      "displayName": "Lazy · default",
+      "input": [
+        "text"
+      ],
+      "periods": {
+        "peak": [
+          {
+            "model": "google-antigravity/gemini-4-argon",
+            "tier": "ultra",
+            "effort": "medium",
+            "intelligence": 63.1,
+            "cost": 0.1
+          },
+          {
+            "model": "google-antigravity/claude-opus-5-5",
+            "tier": "ultra",
+            "effort": "medium",
+            "intelligence": 62.1,
+            "cost": 0.1
+          },
+          {
+            "model": "kiro/claude-opus-5-5",
+            "effort": "medium",
+            "intelligence": 62.1,
+            "cost": 0.3
+          },
+          {
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "effort": "high",
+            "intelligence": 59,
+            "cost": 0.125
+          },
+          {
+            "model": "ctyun/glm-5.3-oc",
+            "effort": "high",
+            "intelligence": 54,
+            "cost": 0.04
+          },
+          {
+            "model": "ctyun/deepseek-v4-pro-0813-oc",
+            "effort": "high",
+            "intelligence": 50,
+            "cost": 0.04
+          }
+        ],
+        "offPeak": [
+          {
+            "sameAs": "peak"
+          }
+        ]
+      }
+    },
+    "lazy/task": {
+      "displayName": "Lazy · task",
+      "input": [
+        "text"
+      ],
+      "periods": {
+        "peak": [
+          {
+            "model": "qoder-cn/deepseek-v4-flash",
+            "effort": "max",
+            "intelligence": 59,
+            "cost": 0.01,
+            "activeUntil": "2026-11-01T00:00:00+08:00"
+          },
+          {
+            "model": "google-antigravity/gemini-3.8-flash",
+            "tier": "pro",
+            "effort": "high",
+            "intelligence": 60.8,
+            "cost": 0.12
+          },
+          {
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "effort": "high",
+            "intelligence": 59,
+            "cost": 0.125
+          },
+          {
+            "model": "ctyun/glm-5.3-oc",
+            "effort": "high",
+            "intelligence": 54,
+            "cost": 0.04
+          },
+          {
+            "model": "ctyun/deepseek-v4-pro-0813-oc",
+            "effort": "high",
+            "intelligence": 50,
+            "cost": 0.04
+          },
+          {
+            "model": "qoder-cn/qwen3.8-flash",
+            "effort": "medium",
+            "intelligence": 34,
+            "cost": 0.01
+          },
+          {
+            "model": "charm-hyper/qwen3.8-flash",
+            "effort": "high",
+            "intelligence": 36.5,
+            "cost": 0.4
+          }
+        ],
+        "offPeak": [
+          {
+            "sameAs": "peak"
+          }
+        ]
+      }
+    },
+    "lazy/vision": {
+      "displayName": "Lazy · vision",
+      "input": [
+        "text",
+        "image"
+      ],
+      "derive": {
+        "from": "lazy/task",
+        "append": [
+          {
+            "model": "google-antigravity/gemini-4-argon",
+            "tier": "ultra",
+            "effort": "medium",
+            "intelligence": 63.1,
+            "cost": 0.1
+          }
+        ]
+      }
+    },
+    "rush/default": {
+      "displayName": "Rush · default",
+      "selection": "ordered",
       "input": [
         "text"
       ],
@@ -18,144 +150,100 @@
           {
             "model": "openai-codex/gpt-6.1-terra",
             "tier": "plus",
-            "effort": "capped",
-            "intelligence": "excellent"
-          },
-          {
-            "model": "kiro/claude-opus-5-5",
-            "effort": "capped",
-            "intelligence": "excellent"
-          },
-          {
-            "model": "google-antigravity/claude-opus-5-5",
-            "tier": "ultra",
-            "effort": "capped",
-            "intelligence": "excellent"
-          },
-          {
-            "model": "google-antigravity/gemini-4-argon",
-            "tier": "ultra",
-            "effort": "capped",
-            "intelligence": "excellent"
+            "effort": "medium",
+            "intelligence": 54.1,
+            "cost": 0.15
           },
           {
             "model": "openai-codex/gpt-6.1-terra",
             "tier": "pro",
-            "effort": "capped",
-            "intelligence": "excellent"
-          },
-          {
-            "model": "mistral-vibe/zai-glm-5-3-flash",
-            "intelligence": "medium"
-          },
-          {
-            "model": "ollama-cloud/glm-5.3-flash",
-            "intelligence": "medium"
-          },
-          {
-            "model": "cline-pass/glm-5.3-flash",
-            "intelligence": "medium"
-          },
-          {
-            "model": "qoder-cn/qwen3.8-flash",
-            "intelligence": "medium"
-          },
-          {
-            "model": "charm-hyper/qwen3.8-flash",
-            "intelligence": "medium"
-          },
-          {
-            "model": "ctyun/deepseek-v4-pro-0813-oc",
-            "intelligence": "medium"
-          },
-          {
-            "model": "ctyun/glm-5.3-oc",
-            "intelligence": "medium"
+            "effort": "medium",
+            "intelligence": 54.1,
+            "cost": 0.15
           }
         ],
         "offPeak": [
-          {
-            "model": "opencode-go/deepseek-v4.1-flash",
-            "intelligence": "excellent"
-          },
           {
             "sameAs": "peak"
           }
         ]
       }
     },
-    "task": {
-      "displayName": "Lazy · sub-task",
+    "rush/task": {
+      "displayName": "Rush · task",
+      "selection": "ordered",
       "input": [
         "text"
       ],
       "periods": {
         "peak": [
           {
-            "model": "google-antigravity/gemini-3.8-flash",
-            "tier": [
-              "pro",
-              "ultra"
-            ],
-            "intelligence": "medium"
-          },
-          {
             "model": "mistral-vibe/zai-glm-5-3-flash",
-            "intelligence": "medium",
-            "activeUntil": "2026-11-01T00:00:00+08:00"
+            "effort": "max",
+            "intelligence": 49.5,
+            "cost": 0.04
           },
           {
-            "model": "qoder-cn/qwen3.8-flash",
-            "intelligence": "medium"
+            "model": "cline-pass/glm-5.3-flash",
+            "effort": "max",
+            "intelligence": 49.5,
+            "cost": 0.25
           },
           {
-            "model": "charm-hyper/qwen3.8-flash",
-            "intelligence": "medium"
-          },
-          {
-            "model": "ctyun/deepseek-v4-pro-0813-oc",
-            "intelligence": "medium"
-          },
-          {
-            "model": "ctyun/glm-5.3-oc",
-            "intelligence": "medium"
+            "model": "ollama-cloud/glm-5.3-flash",
+            "effort": "max",
+            "intelligence": 49.5,
+            "cost": 0.278
           }
         ],
         "offPeak": [
           {
-            "model": "ctyun/deepseek-v4-pro-0813-oc",
-            "intelligence": "medium"
-          },
-          {
-            "model": "ctyun/glm-5.3-oc",
-            "intelligence": "medium"
-          },
-          {
-            "model": "google-antigravity/gemini-3.8-flash",
-            "tier": [
-              "pro",
-              "ultra"
-            ],
-            "intelligence": "medium"
-          },
-          {
-            "model": "mistral-vibe/zai-glm-5-3-flash",
-            "intelligence": "medium",
-            "activeUntil": "2026-11-01T00:00:00+08:00"
-          },
-          {
-            "model": "qoder-cn/qwen3.8-flash",
-            "intelligence": "medium"
-          },
-          {
-            "model": "charm-hyper/qwen3.8-flash",
-            "intelligence": "medium"
+            "sameAs": "peak"
           }
         ]
       }
     },
-    "weak": {
-      "displayName": "Lazy · weak",
+    "rush/vision": {
+      "displayName": "Rush · vision",
+      "selection": "ordered",
+      "input": [
+        "text",
+        "image"
+      ],
+      "derive": {
+        "from": "rush/task"
+      }
+    },
+    "weak/default": {
+      "displayName": "Weak · coordinator",
+      "selection": "ordered",
+      "input": [
+        "text"
+      ],
+      "periods": {
+        "peak": [
+          {
+            "model": "ctyun/glm-5.3-oc",
+            "effort": "high",
+            "intelligence": 54,
+            "cost": 0.04
+          },
+          {
+            "model": "ctyun/deepseek-v4-pro-0813-oc",
+            "effort": "high",
+            "intelligence": 50,
+            "cost": 0.04
+          }
+        ],
+        "offPeak": [
+          {
+            "sameAs": "peak"
+          }
+        ]
+      }
+    },
+    "weak/task": {
+      "displayName": "Weak · workers",
       "contextWindow": 250000,
       "maxOutputTokens": 32768,
       "input": [
@@ -166,22 +254,26 @@
           {
             "model": "commandcode/poolside/laguna-s-2.1-free",
             "effort": "high",
-            "intelligence": "medium"
+            "intelligence": 35,
+            "cost": 0.01
           },
           {
             "model": "commandcode/stealth/glyph-cluster:free",
             "effort": "high",
-            "intelligence": "medium"
+            "intelligence": 35,
+            "cost": 0.01
           },
           {
             "model": "mistral-vibe/mistral-small-latest",
             "effort": "high",
-            "intelligence": "medium"
+            "intelligence": 35,
+            "cost": 0.04
           },
           {
             "model": "opencode-go/iceman-contributor-free",
             "effort": "high",
-            "intelligence": "medium"
+            "intelligence": 35,
+            "cost": 0.01
           }
         ],
         "offPeak": [
@@ -190,44 +282,11 @@
           }
         ]
       }
-    },
-    "vision": {
-      "displayName": "Lazy · vision",
-      "input": [
-        "text",
-        "image"
-      ],
-      "derive": {
-        "from": "task",
-        "append": [
-          {
-            "model": "openai-codex/gpt-6.1-terra",
-            "tier": "plus",
-            "effort": "capped",
-            "intelligence": "excellent"
-          },
-          {
-            "model": "openai-codex/gpt-6.1-terra",
-            "tier": "pro",
-            "effort": "capped",
-            "intelligence": "excellent"
-          },
-          {
-            "model": "google-antigravity/gemini-4-argon",
-            "tier": "ultra",
-            "effort": "capped",
-            "intelligence": "excellent"
-          }
-        ],
-        "excludeModels": [
-          "mistral-vibe/zai-glm-5-3-flash"
-        ]
-      }
     }
   },
   "modelTraits": {
     "qoder-cn/qwen3.8-flash": {
-      "$comment": "The registry advertises minimal..high, but the qoder-cn plugin only accepts low/medium/xhigh upstream and rounds other levels UP (high -> xhigh). Levels both accept:",
+      "$comment": "The qoder-cn plugin accepts low/medium but not high; keep routing aligned to the actual endpoint.",
       "efforts": [
         "low",
         "medium"

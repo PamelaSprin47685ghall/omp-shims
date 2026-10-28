@@ -799,3 +799,28 @@ test("broker block reports are re-pointed at the pinned credential of the same p
     "http://127.0.0.1:8765/v1/credential/1/refresh",
   );
 });
+
+
+describe("ordered dedicated routes", () => {
+  test("table order overrides intelligence and cost scoring", async () => {
+    const policy = {
+      contextWindow: 500000,
+      maxOutputTokens: 64000,
+      peakWindows: [],
+      routes: {
+        default: {
+          selection: "ordered",
+          input: ["text"],
+          periods: { peak: [
+            { model: "q/text", intelligence: 10, cost: 10 },
+            { model: "p/big", tier: "gold", intelligence: 90, cost: 0.01 },
+          ] },
+        },
+      },
+    };
+    const h = harness({ upstream: ok, policy });
+    const response = await h.send({});
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
+    expect(h.calls[0].body.model).toBe("q/text");
+  });
+});

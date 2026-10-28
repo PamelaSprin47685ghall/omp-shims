@@ -1,6 +1,4 @@
-// Lazy router: `lazy/default`, `lazy/task` and `lazy/vision` models that route
-// each request to the first alive (provider, account) unit for the current
-// DeepSeek tariff period, with probe-driven failover and recovery.
+// Virtual-model router: Lazy production routes, Rush dedicated fast lanes and Weak harness experiments share one engine.
 //
 // Wiring only; the parts live in lib/lazy-router/:
 //   routes.json / policy.js      declarative route tables → candidate lists
@@ -36,9 +34,9 @@
 //     "affinityMinPrefixBytes": 1024,// shorter prefixes are not recorded
 //     "admissionWindowMs": 300000,   // rolling window of the admission distribution
 //     "routing": {                    // weighted online routing
-//       "excellentPrior": 1.0, "mediumPrior": 0.0, "latencyWeight": 1.0,
-//       "rdInitial": 1.0, "rdFloor": 0.1, "rdSampleScale": 12, "rdWeight": 0.75,
-//       "affinityWeight": 0.5, "latencyScaleMs": 5000, "coldStartTotalMs": 10000
+//       "intelligenceCenter": 50, "intelligenceSlope": 0.06, "costWeight": 0.20,
+//       "latencyWeight": 1.0, "historicalLatencyWeight": 0.25,
+//       "rdInitial": 1.0, "rdFloor": 0.1, "rdSampleScale": 12, "affinityWeight": 0.5, "temperature": 0.6
 //     }
 //   }
 
