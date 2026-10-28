@@ -310,33 +310,51 @@ export function install(config, context) {
   // without an entry fails every refresh ("Unknown OAuth provider") and each
   // request pays the failed-refresh retry before falling back.
   const registeredOauth = new Set();
+  const pendingOauth = new Map();
   const internalProviders = [{ id: MISTRAL_VIBE_PROVIDER_ID, config: mistralVibeProviderConfig() }];
 
   let oauthBridgeUnavailableLogged = false;
 
-  /**
-   * Register one plugin OAuth config into the host's runtime OAuth registry.
-   * The registry-capture hook exposes `registerOAuthProvider` once the host
-   * materializes that export; until then this is a no-op and the plugin's
-   * oauth config still reaches the registry through registerProvider.
-   */
-  function bridgeOauth(id, pluginOauth) {
-    const oauth = stableIdentityOAuth(id, pluginOauth);
-    const registerOauth = globalThis.__OMP_SHIMS_HOST__?.captured?.get("registerOAuthProvider");
-    if (typeof registerOauth !== "function") {
-      if (!oauthBridgeUnavailableLogged) {
-        oauthBridgeUnavailableLogged = true;
-        log("plugin-bridge: host registerOAuthProvider unavailable; OAuth refresh left to registerProvider");
-      }
+  function registerOauthConfig(registerOauth, id, oauth) {
+    if (registeredOauth.has(id)) {
+      pendingOauth.delete(id);
       return;
     }
     try {
       registerOauth({ ...oauth, id, sourceId: `${PLUGIN_SOURCE}:oauth` });
       registeredOauth.add(id);
+      pendingOauth.delete(id);
       logOnChange(`oauth:${id}`, `plugin-bridge: registered OAuth provider ${id}`);
     } catch (error) {
       log(`plugin-bridge: registerOAuthProvider(${id}) failed: ${error.message}`);
     }
+  }
+
+  /** Flush OAuth providers queued before the host export left its TDZ. */
+  function flushPendingOauth(registerOauth) {
+    if (typeof registerOauth !== "function") return;
+    for (const [id, oauth] of pendingOauth) registerOauthConfig(registerOauth, id, oauth);
+  }
+
+  /**
+   * Register one plugin OAuth config into the host's runtime OAuth registry.
+   * The auth-broker does not construct a ModelRegistry, so if the host export
+   * is still in TDZ during eager plugin init we must retain this config until
+   * registry-capture announces registerOAuthProvider later.
+   */
+  function bridgeOauth(id, pluginOauth) {
+    if (registeredOauth.has(id)) return;
+    const oauth = stableIdentityOAuth(id, pluginOauth);
+    pendingOauth.set(id, oauth);
+    const registerOauth = globalThis.__OMP_SHIMS_HOST__?.captured?.get("registerOAuthProvider");
+    if (typeof registerOauth !== "function") {
+      if (!oauthBridgeUnavailableLogged) {
+        oauthBridgeUnavailableLogged = true;
+        log("plugin-bridge: host registerOAuthProvider unavailable; OAuth registration deferred");
+      }
+      return;
+    }
+    registerOauthConfig(registerOauth, id, oauth);
   }
 
   /**
@@ -592,6 +610,8 @@ export function install(config, context) {
     log("plugin-bridge: host capture unavailable (is registry-capture.js preloaded first?)");
     return;
   }
+  host.observe("registerOAuthProvider", flushPendingOauth);
+  flushPendingOauth(host.captured?.get("registerOAuthProvider"));
   host.observe("ModelRegistry", hookRegistryClass);
   // The class may already have been announced before this feature loaded.
   hookRegistryClass(host.captured?.get("ModelRegistry"));

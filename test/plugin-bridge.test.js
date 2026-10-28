@@ -78,6 +78,45 @@ describe("Qoder capacity normalization", () => {
   });
 });
 
+describe("OAuth bridge", () => {
+  test("registers providers announced before registerOAuthProvider becomes available", async () => {
+    const pluginsDir = tempDir();
+    const packageDir = join(pluginsDir, "node_modules", "fake-oauth-plugin");
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(join(pluginsDir, "package.json"), JSON.stringify({ dependencies: { "fake-oauth-plugin": "*" } }));
+    writeFileSync(join(packageDir, "package.json"), JSON.stringify({ name: "fake-oauth-plugin", main: "./index.js" }));
+    writeFileSync(
+      join(packageDir, "index.js"),
+      'export default (pi) => pi.registerProvider("fake-oauth", { oauth: { refreshToken: async (credential) => credential }, models: [{ id: "m" }], streamSimple: () => {} });\n',
+    );
+
+    const observers = new Map();
+    const previousHost = globalThis.__OMP_SHIMS_HOST__;
+    globalThis.__OMP_SHIMS_HOST__ = {
+      captured: new Map(),
+      observe(name, observer) {
+        const list = observers.get(name) ?? [];
+        list.push(observer);
+        observers.set(name, list);
+      },
+    };
+    const registered = [];
+    try {
+      install({ pluginsDir }, { log: () => {} });
+      await Bun.sleep(10);
+      expect(registered).toHaveLength(0);
+      const registerOauth = (oauth) => registered.push(oauth);
+      globalThis.__OMP_SHIMS_HOST__.captured.set("registerOAuthProvider", registerOauth);
+      for (const observer of observers.get("registerOAuthProvider") ?? []) observer(registerOauth);
+      await Bun.sleep(30);
+      expect(registered.map((oauth) => oauth.id)).toContain("fake-oauth");
+      expect(registered.find((oauth) => oauth.id === "fake-oauth")?.sourceId).toBe("omp-shims:oauth");
+    } finally {
+      globalThis.__OMP_SHIMS_HOST__ = previousHost;
+    }
+  });
+});
+
 describe("registry hooks", () => {
   test("repeated registrations are not logged again and the sync hook is not stacked", async () => {
     const pluginsDir = tempDir();
