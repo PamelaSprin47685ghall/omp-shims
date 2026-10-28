@@ -6,7 +6,7 @@ import { FaultInjector } from "../lib/lazy-router/faults.js";
 import { FORMATS } from "../lib/lazy-router/formats.js";
 import { HealthRegistry } from "../lib/lazy-router/health.js";
 import { RoutePolicy } from "../lib/lazy-router/policy.js";
-import { LazyRouter, SERVED_BY_HEADERS } from "../lib/lazy-router/router.js";
+import { LazyRouter, qoderCapacityProbeOptions, SERVED_BY_HEADERS } from "../lib/lazy-router/router.js";
 import { UnitDirectory } from "../lib/lazy-router/units.js";
 
 const CHAT = FORMATS["/v1/chat/completions"];
@@ -353,6 +353,57 @@ describe("LazyRouter", () => {
       "route",
       "served",
     ]);
+  });
+
+  test("Qoder hard capacity rechecks after one minute and backs off to the normal interval", async () => {
+    const candidate = { unit: { provider: "qoder-cn" } };
+    const options = qoderCapacityProbeOptions(
+      candidate,
+      { message: "[Qoder CN 无可用容量] serviceAvailable:false（子码 RESOURCE_LIMIT，优先级通道 p3）" },
+      1_800_000,
+    );
+    expect(options).toEqual({
+      probeIntervalMs: 60_000,
+      probeBackoff: 2,
+      maxProbeIntervalMs: 1_800_000,
+    });
+
+    const timers = [];
+    const health = new HealthRegistry({
+      probeIntervalMs: 1_800_000,
+      prober: async () => false,
+      setTimer: (fn, ms) => {
+        const timer = { fn, ms };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimer: () => {},
+    });
+    health.markDead("q", "quota", candidate, options);
+    expect(timers.map((timer) => timer.ms)).toEqual([60_000]);
+    for (const expected of [120_000, 240_000, 480_000, 960_000, 1_800_000, 1_800_000]) {
+      await timers.at(-1).fn();
+      expect(timers.at(-1).ms).toBe(expected);
+    }
+    expect(health.entry("q")?.probes).toBe(6);
+  });
+
+  test("Qoder daily quota does not use the transient hard-capacity schedule", () => {
+    const candidate = { unit: { provider: "qoder-cn" } };
+    expect(
+      qoderCapacityProbeOptions(
+        candidate,
+        { message: "[Qoder CN 额度限制] Billing daily count exceeded, 错误码 110" },
+        1_800_000,
+      ),
+    ).toBeUndefined();
+    expect(
+      qoderCapacityProbeOptions(
+        { unit: { provider: "google-antigravity" } },
+        { message: "serviceAvailable:false RESOURCE_LIMIT" },
+        1_800_000,
+      ),
+    ).toBeUndefined();
   });
 
   test("an exhausted quota benches the unit without a probe and fails over within the request", async () => {
