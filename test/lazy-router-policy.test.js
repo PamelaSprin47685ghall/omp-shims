@@ -98,10 +98,16 @@ describe("bundled route tables", () => {
     }
   });
 
-  test("vision derives from task and requires image input", () => {
+  test("vision derives from task, requires image input, and appends durable image fallbacks", () => {
     const { candidates, require } = policy.candidates("vision", PERIOD.PEAK, units);
+    const task = policy.candidates("task", PERIOD.PEAK, units).candidates;
     expect(require).toEqual(["text", "image"]);
-    expect(candidates).toEqual(policy.candidates("task", PERIOD.PEAK, units).candidates);
+    expect(candidates.slice(0, task.length)).toEqual(task);
+    expect(candidates.slice(task.length).map((c) => `${c.unit.label} ${c.model}`)).toEqual([
+      "openai-codex:plus#1 openai-codex/gpt-6.1-terra",
+      "openai-codex:pro#1 openai-codex/gpt-6.1-terra",
+      "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
+    ]);
   });
 
   test("routeFor accepts only lazy models with a table", () => {
