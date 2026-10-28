@@ -26,6 +26,12 @@
             "intelligence": "excellent"
           },
           {
+            "model": "google-antigravity/claude-opus-5-5",
+            "tier": "ultra",
+            "effort": "capped",
+            "intelligence": "excellent"
+          },
+          {
             "model": "google-antigravity/gemini-4-argon",
             "tier": "ultra",
             "effort": "capped",

@@ -45,6 +45,7 @@ describe("bundled route tables", () => {
     expect(order("default", PERIOD.PEAK)).toEqual([
       "openai-codex:plus#1 openai-codex/gpt-6.1-terra",
       "kiro kiro/claude-opus-5-5",
+      "google-antigravity:ultra#1 google-antigravity/claude-opus-5-5",
       "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
       "openai-codex:pro#1 openai-codex/gpt-6.1-terra",
       "mistral-vibe mistral-vibe/zai-glm-5-3-flash",
@@ -65,12 +66,12 @@ describe("bundled route tables", () => {
     expect(offPeak.slice(1)).toEqual(order("default", PERIOD.PEAK));
   });
 
-  test("capped entries are exactly the codex, kiro and gemini-4 ones", () => {
+  test("capped entries are exactly the configured excellent front-runners", () => {
     const capped = policy
       .candidates("default", PERIOD.PEAK, units)
       .candidates.filter((c) => c.effort === "capped")
       .map((c) => c.unit.label);
-    expect(capped).toEqual(["openai-codex:plus#1", "kiro", "google-antigravity:ultra#1", "openai-codex:pro#1"]);
+    expect(capped).toEqual(["openai-codex:plus#1", "kiro", "google-antigravity:ultra#1", "google-antigravity:ultra#1", "openai-codex:pro#1"]);
   });
 
   test("task lists differ by period; gemini-3.8-flash drains Pro accounts before Ultra", () => {
@@ -86,6 +87,18 @@ describe("bundled route tables", () => {
       "ctyun ctyun/glm-5.3-oc",
       "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
     ]);
+  });
+
+  test("antigravity opus 5.5 is an excellent capped Ultra candidate in every default period", () => {
+    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
+      const matches = policy
+        .candidates("default", period, units)
+        .candidates.filter((c) => c.model === "google-antigravity/claude-opus-5-5");
+      expect(matches).toHaveLength(1);
+      expect(matches[0].unit.label).toBe("google-antigravity:ultra#1");
+      expect(matches[0].intelligence).toBe("excellent");
+      expect(matches[0].effort).toBe("capped");
+    }
   });
 
   test("gemini-4 is served by Ultra accounts only, in every period", () => {
