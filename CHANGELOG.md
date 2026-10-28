@@ -103,6 +103,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `plugin-bridge`: preload async provider plugins before OMP startup and synchronously override built-in providers before the first `ModelRegistry.getAll()`, so Command Code models such as `stealth/glyph-cluster:free` use the plugin `commandcode-custom` transport instead of a stale native provider.
 - `plugin-bridge`: a registry is populated once and again after each `refresh()`,
   instead of on every `getAll()`. The lazy-router catalog now also recognises the
   live registry from `getAvailable` and `registerProvider`, which it had relied on

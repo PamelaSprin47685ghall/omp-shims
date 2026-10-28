@@ -102,7 +102,7 @@ describe("OAuth bridge", () => {
     };
     const registered = [];
     try {
-      install({ pluginsDir }, { log: () => {} });
+      await install({ pluginsDir }, { log: () => {} });
       await Bun.sleep(10);
       expect(registered).toHaveLength(0);
       const registerOauth = (oauth) => registered.push(oauth);
@@ -118,6 +118,40 @@ describe("OAuth bridge", () => {
 });
 
 describe("registry hooks", () => {
+  test("plugin provider overrides a built-in provider before the first synchronous getAll", async () => {
+    const pluginsDir = tempDir();
+    const packageDir = join(pluginsDir, "node_modules", "fake-commandcode-plugin");
+    mkdirSync(packageDir, { recursive: true });
+    writeFileSync(join(pluginsDir, "package.json"), JSON.stringify({ dependencies: { "fake-commandcode-plugin": "*" } }));
+    writeFileSync(join(packageDir, "package.json"), JSON.stringify({ name: "fake-commandcode-plugin", main: "./index.js" }));
+    writeFileSync(
+      join(packageDir, "index.js"),
+      'export default (pi) => pi.registerProvider("commandcode", { api: "commandcode-custom", models: [{ id: "stealth/glyph-cluster:free" }], streamSimple: () => {} });\n',
+    );
+
+    class FakeModelRegistry {
+      constructor() {
+        this.config = { api: "openai-completions", models: [{ id: "stealth/glyph-cluster:free" }] };
+      }
+      registerProvider(_name, config) {
+        this.config = config;
+      }
+      async refresh() {}
+      getAll() {
+        return this.config.models.map((model) => ({ ...model, provider: "commandcode", api: model.api ?? this.config.api }));
+      }
+    }
+    const previousHost = globalThis.__OMP_SHIMS_HOST__;
+    globalThis.__OMP_SHIMS_HOST__ = { captured: new Map([["ModelRegistry", FakeModelRegistry]]), observe: () => {} };
+    try {
+      await install({ pluginsDir }, { log: () => {}, registerTransport: () => {} });
+      const [glyph] = new FakeModelRegistry().getAll();
+      expect(glyph.api).toBe("commandcode-custom");
+    } finally {
+      globalThis.__OMP_SHIMS_HOST__ = previousHost;
+    }
+  });
+
   test("repeated registrations are not logged again and the sync hook is not stacked", async () => {
     const pluginsDir = tempDir();
     const packageDir = join(pluginsDir, "node_modules", "fake-plugin");
@@ -158,7 +192,7 @@ describe("registry hooks", () => {
     globalThis.__OMP_SHIMS_HOST__ = { captured: new Map([["ModelRegistry", FakeModelRegistry]]), observe: () => {} };
     const lines = [];
     try {
-      install({ pluginsDir }, { log: (line) => lines.push(line) });
+      await install({ pluginsDir }, { log: (line) => lines.push(line) });
       const registry = new FakeModelRegistry();
       registry.getAll();
       await registry.refresh(); // joins the pass getAll started

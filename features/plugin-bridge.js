@@ -275,7 +275,7 @@ function wrapTransportEvents(transport, provider) {
   };
 }
 
-export function install(config, context) {
+export async function install(config, context) {
   const log = context.log ?? (() => {});
   const pluginsDir = config.pluginsDir ?? join(homedir(), ".omp", "plugins");
   // Token specs are provider-agnostic and live outside `features`, so they are
@@ -311,6 +311,10 @@ export function install(config, context) {
   // request pays the failed-refresh retry before falling back.
   const registeredOauth = new Set();
   const pendingOauth = new Map();
+  // Providers collected during eager plugin init. getAll() is synchronous, so
+  // it cannot await plugin loading; this cache lets it replace any built-in
+  // provider before returning the very first model snapshot.
+  const preparedProviders = new Map();
   const internalProviders = [{ id: MISTRAL_VIBE_PROVIDER_ID, config: mistralVibeProviderConfig() }];
 
   let oauthBridgeUnavailableLogged = false;
@@ -357,6 +361,28 @@ export function install(config, context) {
     registerOauthConfig(registerOauth, id, oauth);
   }
 
+  function prepareProvider(id, providerConfig) {
+    if (!providerConfig?.streamSimple && !providerConfig?.models) return undefined;
+    const config = { ...providerConfig };
+    if (config.oauth) config.oauth = stableIdentityOAuth(id, config.oauth);
+    if (typeof config.streamSimple === "function") {
+      config.streamSimple = wrapTransportEvents(config.streamSimple, id);
+      if (config.api) context.registerTransport?.(config.api, config.streamSimple);
+    }
+    return config;
+  }
+
+  /** Register already-loaded plugin providers synchronously before getAll(). */
+  function registerPreparedInto(registry) {
+    for (const [id, prepared] of preparedProviders) {
+      try {
+        registry.registerProvider(id, prepared.config, prepared.source);
+      } catch (error) {
+        log("plugin-bridge: registerProvider(" + id + ") failed: " + error.message);
+      }
+    }
+  }
+
   /**
    * Load the plugins once at install time so their OAuth configs reach the
    * runtime registry immediately. The broker's refresh sweep and the
@@ -386,6 +412,13 @@ export function install(config, context) {
               if (providerConfig?.oauth && typeof providerConfig.oauth === "object") {
                 bridgeOauth(id, providerConfig.oauth);
               }
+              const prepared = prepareProvider(id, providerConfig);
+              if (!prepared) return;
+              preparedProviders.set(id, {
+                config: prepared,
+                source: PLUGIN_SOURCE + ":" + pkg.name,
+              });
+              tokens.set(id, resolveToken(id));
             }),
           );
         } catch (error) {
@@ -436,15 +469,8 @@ export function install(config, context) {
                 try {
                   // OMP consumes the provider's events directly, so a pi-shaped
                   // transport is adapted before it is handed over.
-                  const config = { ...providerConfig };
-                  if (config.oauth) config.oauth = stableIdentityOAuth(id, config.oauth);
-                  if (typeof config.streamSimple === "function") {
-                    config.streamSimple = wrapTransportEvents(config.streamSimple, id);
-                    // Let the vendored pi-ai shim dispatch to this provider, for
-                    // the case where a plugin streams through its own
-                    // `streamSimple` import instead of OMP's pipeline.
-                    if (config.api) context.registerTransport?.(config.api, config.streamSimple);
-                  }
+                  const config = prepareProvider(id, providerConfig);
+                  if (!config) return;
                   registry.registerProvider(id, config, `${PLUGIN_SOURCE}:${pkg.name}`);
                   if (providerConfig.oauth && typeof providerConfig.oauth === "object")
                     bridgeOauth(id, providerConfig.oauth);
@@ -529,7 +555,11 @@ export function install(config, context) {
           try {
             state.hasProvider = registry.hasProvider?.(provider);
             state.concreteAuth = registry.hasConcreteAuth?.(provider);
-            state.models = registry.getProviderModels?.(provider)?.length;
+            const providerModels = registry.getProviderModels?.(provider) ?? [];
+            state.models = providerModels.length;
+            state.providerApi = registry.getRegisteredProviderConfig?.(provider)?.api;
+            state.modelApis = [...new Set(providerModels.map((model) => model.api).filter(Boolean))].sort();
+            state.hasNativeProvider = Boolean(registry.getRegisteredNativeProvider?.(provider));
             state.keySource = keys?.source?.(provider);
             state.available = registry.getAvailableForProviders?.(new Set([provider]), "chat")?.length;
           } catch (error) {
@@ -563,6 +593,7 @@ export function install(config, context) {
         // `getAll` is sync: run registration eagerly so the caller sees plugins
         // on its very first call, and let any async tail settle on its own.
         if (method === "getAll") {
+          if (!populated.has(this)) registerPreparedInto(this);
           const res = original.apply(this, args);
           if (!populated.has(this)) registerInto(this).catch(() => {});
           return res;
@@ -602,6 +633,11 @@ export function install(config, context) {
 
     log("plugin-bridge: hooked ModelRegistry refresh/getAll");
   }
+
+  // Do not let OMP continue startup until plugin configs and transports are
+  // prepared. This makes PROCESS_FEATURES load order real, including the async
+  // vendor-shims -> plugin-bridge dependency.
+  await eagerInit;
 
   // The capture lives in its own preloaded module so it can install itself
   // before this file's static imports are evaluated.
