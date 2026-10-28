@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { containsImage, FORMATS, probeBody, rewriteBody, STREAM_EVENT } from "../lib/lazy-router/formats.js";
+import { containsImage, FORMATS, probeBody, rewriteBody, rewriteResponseModel, STREAM_EVENT } from "../lib/lazy-router/formats.js";
 import { SseScanner } from "../lib/lazy-router/sse.js";
 
 const chat = FORMATS["/v1/chat/completions"];
@@ -102,5 +102,48 @@ describe("stream events", () => {
     );
     expect(messages.classifyEvent({ data: { type: "content_block_delta" } })).toBe(STREAM_EVENT.PROGRESS);
     expect(messages.classifyEvent({ data: { type: "error" } })).toBe(STREAM_EVENT.ERROR);
+  });
+});
+describe("rewriteResponseModel", () => {
+  test("non-streaming JSON keeps the Lazy model identity", async () => {
+    const response = new Response(JSON.stringify({ id: "x", model: "kiro/claude-opus-5-5", choices: [] }), {
+      headers: { "content-type": "application/json", "content-length": "99" },
+    });
+    const rewritten = rewriteResponseModel(chat, response, "lazy/default");
+    expect(await rewritten.json()).toEqual({ id: "x", model: "lazy/default", choices: [] });
+    expect(rewritten.headers.get("content-length")).toBeNull();
+  });
+
+  test("chat SSE rewrites top-level model across chunk boundaries", async () => {
+    const source = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"id":"x","model":"kiro/cla'));
+        controller.enqueue(new TextEncoder().encode('ude-opus-5-5","choices":[{"delta":{"content":"ok"}}]}\n\n'));
+        controller.close();
+      },
+    });
+    const response = new Response(source, { headers: { "content-type": "text/event-stream" } });
+    const text = await rewriteResponseModel(chat, response, "lazy/default").text();
+    expect(text).toContain('"model":"lazy/default"');
+    expect(text).not.toContain("kiro/claude-opus-5-5");
+    expect(text).toContain('"content":"ok"');
+  });
+
+  test("Responses and Messages rewrite their nested model identity", async () => {
+    const responseEvent = new Response(
+      'event: response.created\ndata: {"type":"response.created","response":{"id":"r","model":"ctyun/glm-5.3-oc"}}\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    );
+    const responseText = await rewriteResponseModel(responses, responseEvent, "lazy/default").text();
+    expect(responseText).toContain('"model":"lazy/default"');
+    expect(responseText).not.toContain("ctyun/glm-5.3-oc");
+
+    const messageEvent = new Response(
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"m","model":"qoder-cn/qwen3.8-flash"}}\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    );
+    const messageText = await rewriteResponseModel(messages, messageEvent, "lazy/task").text();
+    expect(messageText).toContain('"model":"lazy/task"');
+    expect(messageText).not.toContain("qoder-cn/qwen3.8-flash");
   });
 });

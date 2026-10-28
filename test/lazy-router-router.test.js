@@ -139,7 +139,7 @@ function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
       await response.text();
       if (!response.ok)
         return Response.json({ error: { message: "upstream", type: "upstream_error" } }, { status: 502 });
-      return Response.json({ served: body.model });
+      return Response.json({ served: body.model, model: body.model });
     } catch {
       return Response.json({ error: { message: "aborted" } }, { status: 502 });
     }
@@ -190,6 +190,8 @@ describe("LazyRouter", () => {
     const response = await h.send({ reasoning_effort: "high", max_tokens: 100 });
     expect(response.status).toBe(200);
     expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#1");
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("p/big");
+    expect((await response.clone().json()).model).toBe("lazy/default");
     expect(h.calls).toHaveLength(1);
     expect(h.calls[0].auth).toBe("Bearer tok-1");
     expect(h.calls[0].body).toMatchObject({ model: "p/big", reasoning_effort: "medium", max_completion_tokens: 64000 });
