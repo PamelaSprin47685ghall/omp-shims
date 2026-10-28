@@ -30,8 +30,9 @@ const ACCOUNTS = [
 const tierSource = (accounts, version = 1) => ({ version, ready: Promise.resolve(), accounts: () => accounts });
 const policy = new RoutePolicy(loadPolicyData());
 const units = new UnitDirectory({ tiers: tierSource(ACCOUNTS) });
-const order = (route, period, directory = units) =>
-  policy.candidates(route, period, directory).candidates.map((c) => `${c.unit.label} ${c.model}`);
+const TEST_NOW = new Date("2026-10-28T12:00:00+08:00");
+const order = (route, period, directory = units, at = TEST_NOW) =>
+  policy.candidates(route, period, directory, at).candidates.map((c) => `${c.unit.label} ${c.model}`);
 
 describe("bundled route tables", () => {
   test("the bundled tables name no accounts", () => {
@@ -80,13 +81,25 @@ describe("bundled route tables", () => {
       "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#3 google-antigravity/gemini-3.8-flash",
       "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
-      "qoder-cn qoder-cn/qwen3.8-flash",
+      "mistral-vibe mistral-vibe/zai-glm-5-3-flash",
     ]);
     expect(order("task", PERIOD.OFF_PEAK).slice(0, 3)).toEqual([
       "ctyun ctyun/deepseek-v4-pro-0813-oc",
       "ctyun ctyun/glm-5.3-oc",
       "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
     ]);
+  });
+
+  test("Mistral Vibe is a medium task candidate only through October 2026 and never inherits into vision", () => {
+    const active = new Date("2026-10-31T23:59:59+08:00");
+    const expired = new Date("2026-11-01T00:00:00+08:00");
+    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
+      const live = policy.candidates("task", period, units, active).candidates.filter((c) => c.model === "mistral-vibe/zai-glm-5-3-flash");
+      expect(live).toHaveLength(1);
+      expect(live[0].intelligence).toBe("medium");
+      expect(policy.candidates("task", period, units, expired).candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
+      expect(policy.candidates("vision", period, units, active).candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
+    }
   });
 
   test("antigravity opus 5.5 is an excellent capped Ultra candidate in every default period", () => {
@@ -112,8 +125,10 @@ describe("bundled route tables", () => {
   });
 
   test("vision derives from task, requires image input, and appends durable image fallbacks", () => {
-    const { candidates, require } = policy.candidates("vision", PERIOD.PEAK, units);
-    const task = policy.candidates("task", PERIOD.PEAK, units).candidates;
+    const { candidates, require } = policy.candidates("vision", PERIOD.PEAK, units, TEST_NOW);
+    const task = policy
+      .candidates("task", PERIOD.PEAK, units, TEST_NOW)
+      .candidates.filter((c) => c.model !== "mistral-vibe/zai-glm-5-3-flash");
     expect(require).toEqual(["text", "image"]);
     expect(candidates.slice(0, task.length)).toEqual(task);
     expect(candidates.slice(task.length).map((c) => `${c.unit.label} ${c.model}`)).toEqual([
@@ -226,6 +241,12 @@ describe("validation", () => {
     const empty = base();
     empty.routes.r.periods.peak[0].tier = [];
     expect(() => new RoutePolicy(empty)).toThrow(/tier/);
+  });
+
+  test("invalid activeUntil timestamps are rejected", () => {
+    const data = base();
+    data.routes.r.periods.peak[0].activeUntil = "not-a-date";
+    expect(() => new RoutePolicy(data)).toThrow(/activeUntil/);
   });
 
   test("sameAs cycles are rejected at load time", () => {

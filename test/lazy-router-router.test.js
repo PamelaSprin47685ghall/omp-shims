@@ -558,6 +558,29 @@ describe("LazyRouter", () => {
     expect(h.events.find((e) => e.event === "attempt-failed").source).toBe("injected");
   });
 
+  test("expired route entries disappear from routing and status at the same instant", async () => {
+    const policy = {
+      ...POLICY,
+      routes: {
+        default: {
+          input: ["text"],
+          periods: {
+            peak: [
+              { model: "q/text", activeUntil: "2026-11-01T00:00:00+08:00" },
+              { model: "p/big", tier: "gold" },
+            ],
+          },
+        },
+      },
+    };
+    const h = harness({ upstream: ok, policy });
+    h.router.now = () => new Date("2026-11-01T00:00:00+08:00");
+    const response = await h.send({});
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#1");
+    const view = await h.router.status().json();
+    expect(view.routes.default.some((row) => row.model === "q/text")).toBe(false);
+  });
+
   test("advertised models", () => {
     const h = harness({ upstream: ok });
     const models = h.router.advertisedModels();
