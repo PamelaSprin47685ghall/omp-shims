@@ -36,10 +36,11 @@ function ranked(route, at, options = {}) {
 }
 
 describe("recursive keyed-model algebra", () => {
-  test("only five Lazy routes exist", () => {
+  test("only four Lazy routes exist after batch-blind retirement", () => {
     expect(policy.routeNames).toEqual([
-      "lazy/pro", "lazy/batch-blind", "lazy/weak", "lazy/default", "lazy/task",
+      "lazy/pro", "lazy/weak", "lazy/default", "lazy/task",
     ]);
+    expect(policy.routeFor("lazy/batch-blind")).toBeUndefined();
     for (const name of ["weak/task", "rush/default", "rush/task", "rush/vision", "lazy/vision", "weak/default", "lazy/flash"]) expect(policy.routeFor(name)).toBeUndefined();
   });
 
@@ -120,7 +121,7 @@ describe("recursive keyed-model algebra", () => {
     expect(raw.filter((c) => c.model === "google-antigravity/gemini-4-argon")).toHaveLength(2);
   });
 
-  test("Lazy Task lets GLM Flash and all five original DeepSeek models compete in one rating pool", () => {
+  test("Lazy Task lets GLM Flash and all six DeepSeek models compete in one rating pool", () => {
     const glm = "mistral-vibe/zai-glm-5-3-flash";
     const deepseek = [
       "mistral-vibe/deepseek-v4-1-flash-1017",
@@ -128,6 +129,7 @@ describe("recursive keyed-model algebra", () => {
       "opencode-go/deepseek-v4.1-flash",
       "ollama-cloud/deepseek-v4.1-flash:1017",
       "cline-pass/deepseek-v4.1-flash-1017",
+      "ctyun/deepseek-v4.1-flash",
     ];
     const at = when("2026-10-31T14:00:00Z");
     const candidates = policy.candidates("lazy/task", "peak", units, at).candidates;
@@ -145,12 +147,15 @@ describe("recursive keyed-model algebra", () => {
     });
     expect(fast(glm)[0].model).toBe(glm);
     expect(fast(deepseek[0])[0].model).toBe(deepseek[0]);
+    expect(fast(deepseek.at(-1))[0].model).toBe(deepseek.at(-1));
     const activePeak = policy.candidates("lazy/task", "peak", units,
       when("2026-10-29T02:00:00Z")).candidates;
     expect(activePeak.some((c) => c.model === deepseek[2])).toBe(false);
+    expect(activePeak.some((c) => c.model === "ctyun/deepseek-v4.1-flash")).toBe(true);
     const ollamaPeak = policy.candidates("lazy/task", "peak", units,
       when("2026-10-29T14:00:00Z")).candidates;
     expect(ollamaPeak.some((c) => c.model === deepseek[3])).toBe(false);
+    expect(ollamaPeak.some((c) => c.model === "ctyun/deepseek-v4.1-flash")).toBe(true);
   });
 
   test("model rating compares only predicted completion time, never configured intelligence or cost", () => {

@@ -45,14 +45,6 @@
         ]
       }
     },
-    "lazy/batch-blind": {
-      "displayName": "Lazy Batch Blind",
-      "graph": {
-        "type": "model",
-        "model": "ctyun/glm-5.3-oc",
-        "effort": "max"
-      }
-    },
     "lazy/weak": {
       "displayName": "Lazy Weak",
       "contextWindow": 250000,
@@ -120,6 +112,11 @@
             "model": "cline-pass/deepseek-v4.1-flash-1017",
             "effort": "max",
             "offPeakOnly": "ollama"
+          },
+          {
+            "type": "model",
+            "model": "ctyun/deepseek-v4.1-flash",
+            "effort": "max"
           }
         ]
       }
