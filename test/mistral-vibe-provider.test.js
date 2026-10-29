@@ -3,6 +3,8 @@ import { describe, expect, test } from "bun:test";
 import {
   fetchMistralVibeModels,
   installMistralVibeResponseAdapter,
+  addMistralPromptCacheKey,
+  mistralPromptCacheKey,
   loginMistralVibe,
   MISTRAL_VIBE_API_BASE,
   MISTRAL_VIBE_AUTH_API_BASE,
@@ -14,6 +16,101 @@ import {
 
 const reply = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+describe("Mistral Vibe native prefix-cache compatibility", () => {
+  const first = {
+    model: "deepseek-v4-1-flash-1017",
+    messages: [
+      { role: "system", content: "An unchanged shared system instruction." },
+      { role: "user", content: "The first turn in this conversation." },
+    ],
+    stream: false,
+  };
+
+  test("stable across appended turns, opaque, scoped by model and initial turn", () => {
+    const firstKey = mistralPromptCacheKey(first);
+    const nextKey = mistralPromptCacheKey({
+      ...first,
+      messages: [...first.messages, { role: "assistant", content: "Answer" },
+        { role: "user", content: "A follow-up question" }],
+    });
+    expect(firstKey).toBe(nextKey);
+    expect(firstKey).toStartWith("omp-");
+    expect(firstKey).not.toContain("first");
+    expect(mistralPromptCacheKey({ ...first, model: "another-model" })).not.toBe(firstKey);
+    expect(mistralPromptCacheKey({ ...first, messages: [
+      first.messages[0], { role: "user", content: "Another initial turn" },
+    ] })).not.toBe(firstKey);
+    expect(mistralPromptCacheKey({ messages: [] })).toBeUndefined();
+  });
+
+  test("caller-provided key, even null, is retained and malformed input passes through", () => {
+    for (const value of ["application-key", null]) {
+      const text = JSON.stringify({ ...first, prompt_cache_key: value });
+      expect(addMistralPromptCacheKey(text)).toBeUndefined();
+    }
+    expect(addMistralPromptCacheKey("not json")).toBeUndefined();
+    expect(addMistralPromptCacheKey(JSON.stringify({ model: first.model }))).toBeUndefined();
+  });
+
+  test("rewrites only Mistral JSON chat request; preserves cached usage and body", async () => {
+    const handlers = [];
+    installMistralVibeResponseAdapter({
+      addFetchHandler: (handler) => handlers.push(handler),
+      preserveResponseUrl: (response) => response,
+    });
+    const seen = [];
+    const next = async (target, init) => {
+      seen.push({ url: String(target), init, body: JSON.parse(init.body) });
+      return reply({
+        usage: { prompt_tokens: 512, prompt_tokens_details: { cached_tokens: 448 } },
+        choices: [{ message: { role: "assistant", content: "OK" } }],
+      });
+    };
+    const url = "https://api.mistral.ai/v1/chat/completions";
+    const init = { method: "POST", headers: {
+      "content-type": "application/json", "content-length": "10",
+    }, body: JSON.stringify(first) };
+    const response = await handlers[0](url, init, next);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].body.messages).toEqual(first.messages);
+    expect(seen[0].body.prompt_cache_key).toBe(mistralPromptCacheKey(first));
+    expect(new Headers(seen[0].init.headers).has("content-length")).toBe(false);
+    expect((await response.json()).usage.prompt_tokens_details.cached_tokens).toBe(448);
+    await handlers[0](url, { ...init, body: JSON.stringify({ ...first, messages: [
+      ...first.messages, { role: "user", content: "Next turn" },
+    ] }) }, next);
+    expect(seen[1].body.prompt_cache_key).toBe(seen[0].body.prompt_cache_key);
+    const untrusted = await handlers[0]("https://example.net/v1/chat/completions", init, next);
+    expect(seen[2].body.prompt_cache_key).toBeUndefined();
+    expect((await untrusted.json()).choices).toHaveLength(1);
+  });
+
+  test("supports Request objects without losing method or sending twice on network errors", async () => {
+    const handlers = [];
+    installMistralVibeResponseAdapter({
+      addFetchHandler: (handler) => handlers.push(handler),
+      preserveResponseUrl: (response) => response,
+    });
+    const url = "https://api.mistral.ai/v1/chat/completions";
+    const original = new Request(url, {
+      method: "POST",
+      body: JSON.stringify(first),
+      headers: { "content-type": "application/json" },
+    });
+    let calls = 0;
+    const upstream = async (input, init) => {
+      calls += 1;
+      expect(input).toBeInstanceOf(Request);
+      expect(input.method).toBe("POST");
+      expect((await input.clone().json()).prompt_cache_key).toBe(mistralPromptCacheKey(first));
+      expect(init).toBeUndefined();
+      throw new Error("upstream failed");
+    };
+    await expect(handlers[0](original, undefined, upstream)).rejects.toThrow("upstream failed");
+    expect(calls).toBe(1);
+  });
+});
 
 describe("Mistral Vibe reasoning stream adapter", () => {
   test("maps structured thinking blocks to reasoning_content without changing text", () => {
@@ -31,6 +128,8 @@ describe("Mistral Vibe reasoning stream adapter", () => {
     });
     expect(lines[1]).toBe('data: {"choices":[{"index":0,"delta":{"content":"answer"},"finish_reason":null}]}');
     expect(lines[2]).toBe("data: [DONE]");
+    const usage = 'data: {"usage":{"prompt_tokens":3364,"prompt_tokens_details":{"cached_tokens":3344}}}';
+    expect(normalizeMistralVibeSse(usage)).toBe(usage);
   });
 
   test("flattens text content blocks and leaves unknown structured blocks untouched", () => {
