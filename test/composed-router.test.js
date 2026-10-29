@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ComposedPolicy, isDeepSeekPeak, isOllamaPeak } from "../lib/lazy-router/composed-policy.js";
 import { CyclicSpeed, periodicBasis } from "../lib/lazy-router/cyclic-speed.js";
+import { InFlightTracker } from "../lib/lazy-router/capacity.js";
 
 const when = (s) => new Date(s);
 const accounts = [
@@ -50,6 +51,49 @@ describe("recursive keyed-model algebra", () => {
     expect(ranked("rush/default", at).map((c) => c.unit.tier)).toEqual(expected);
     expect(ranked("lazy/default", at, { available: (c) => c.unit.key !== "plus1" }).map((c) => c.unit.key)).toEqual(["plus2", "pro1"]);
     expect(ranked("lazy/default", at, { available: (c) => c.unit.tier !== "plus" }).map((c) => c.unit.key)).toEqual(["pro1"]);
+  });
+
+  test("Mistral DeepSeek has 20 concurrent slots for each Key, not 20 shared across Keys", () => {
+    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const key1 = { provider: "mistral-vibe", key: "mistral-vibe/31", label: "mistral-vibe#1" };
+    const key2 = { provider: "mistral-vibe", key: "mistral-vibe/42", label: "mistral-vibe#2" };
+    const first = policy.capacityUnit({ unit: key1, model });
+    const second = policy.capacityUnit({ unit: key2, model });
+    const small = policy.capacityUnit({ unit: key1, model: "mistral-vibe/mistral-small-latest" });
+    const tracker = new InFlightTracker({ limitOf: (unit) => policy.maxInFlight(unit) });
+    expect(policy.maxInFlight(first)).toBe(20);
+    expect(policy.maxInFlight(second)).toBe(20);
+    expect(policy.maxInFlight(small)).toBe(0);
+    expect(small).toBe(key1);
+    expect(first.key).not.toBe(second.key);
+    const held = Array.from({ length: 20 }, () => tracker.slot(first));
+    expect(tracker.inFlight(first)).toBe(20);
+    expect(tracker.hasRoom(first)).toBe(false);
+    expect(tracker.hasRoom(second)).toBe(true);
+    const otherKey = tracker.slot(second);
+    expect(tracker.inFlight(second)).toBe(1);
+    expect(tracker.inFlight(first)).toBe(20);
+    expect(tracker.hasRoom(small)).toBe(true);
+    const probe = tracker.slot(second, { reserve: true });
+    probe.beginRequest();
+    expect(tracker.inFlight(second)).toBe(2);
+    probe.releaseAll();
+    held[0].releaseAll();
+    expect(tracker.inFlight(first)).toBe(19);
+    expect(tracker.hasRoom(first)).toBe(true);
+    held.forEach((slot) => slot.releaseAll());
+    otherKey.releaseAll();
+    expect(tracker.inFlight(first)).toBe(0);
+    expect(tracker.inFlight(second)).toBe(0);
+  });
+
+  test("both task aliases share the same Key/model capacity identity", () => {
+    const at = when("2026-10-29T12:00:00Z");
+    const find = (route) => policy.candidates(route, "peak", units, at).candidates.find(
+      (c) => c.model === "mistral-vibe/deepseek-v4-1-flash-1017" && c.unit.key === "m1"
+    );
+    expect(policy.capacityUnit(find("lazy/task")).key)
+      .toBe(policy.capacityUnit(find("rush/task")).key);
   });
 
   test("Rush/task is an alias; multiple Mistral keys receive one shared speed prediction", () => {

@@ -4,7 +4,8 @@
   "maxOutputTokens": 64000,
   "maxInFlight": {
     "ollama-cloud": 3,
-    "charm-hyper": 2
+    "charm-hyper": 2,
+    "mistral-vibe/deepseek-v4-1-flash-1017": 20
   },
   "routes": {
     "lazy/pro": {
