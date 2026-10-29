@@ -121,10 +121,9 @@ describe("recursive keyed-model algebra", () => {
     expect(raw.filter((c) => c.model === "google-antigravity/gemini-4-argon")).toHaveLength(2);
   });
 
-  test("Lazy Task lets GLM Flash and all six DeepSeek models compete in one rating pool", () => {
+  test("Lazy Task excludes uncached Mistral DeepSeek and keeps all five other DeepSeek models", () => {
     const glm = "mistral-vibe/zai-glm-5-3-flash";
     const deepseek = [
-      "mistral-vibe/deepseek-v4-1-flash-1017",
       "charm-hyper/deepseek-v4.1-flash-1017",
       "opencode-go/deepseek-v4.1-flash",
       "ollama-cloud/deepseek-v4.1-flash:1017",
@@ -133,6 +132,7 @@ describe("recursive keyed-model algebra", () => {
     ];
     const at = when("2026-10-31T14:00:00Z");
     const candidates = policy.candidates("lazy/task", "peak", units, at).candidates;
+    expect(candidates.some((c) => c.model === "mistral-vibe/deepseek-v4-1-flash-1017")).toBe(false);
     expect(candidates.filter((c) => c.model === glm)).toHaveLength(2);
     expect(new Set(candidates.map((c) => c.model))).toEqual(new Set([glm, ...deepseek]));
     const topology = policy.routeTopology()["lazy/task"].graph;
@@ -150,11 +150,11 @@ describe("recursive keyed-model algebra", () => {
     expect(fast(deepseek.at(-1))[0].model).toBe(deepseek.at(-1));
     const activePeak = policy.candidates("lazy/task", "peak", units,
       when("2026-10-29T02:00:00Z")).candidates;
-    expect(activePeak.some((c) => c.model === deepseek[2])).toBe(false);
+    expect(activePeak.some((c) => c.model === deepseek[1])).toBe(false);
     expect(activePeak.some((c) => c.model === "ctyun/deepseek-v4.1-flash")).toBe(true);
     const ollamaPeak = policy.candidates("lazy/task", "peak", units,
       when("2026-10-29T14:00:00Z")).candidates;
-    expect(ollamaPeak.some((c) => c.model === deepseek[3])).toBe(false);
+    expect(ollamaPeak.some((c) => c.model === deepseek[2])).toBe(false);
     expect(ollamaPeak.some((c) => c.model === "ctyun/deepseek-v4.1-flash")).toBe(true);
   });
 

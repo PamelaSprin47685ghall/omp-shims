@@ -87,11 +87,6 @@
           },
           {
             "type": "model",
-            "model": "mistral-vibe/deepseek-v4-1-flash-1017",
-            "effort": "max"
-          },
-          {
-            "type": "model",
             "model": "charm-hyper/deepseek-v4.1-flash-1017",
             "effort": "max"
           },
