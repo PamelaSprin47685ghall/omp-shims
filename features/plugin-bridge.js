@@ -442,7 +442,7 @@ export async function install(config, context) {
       const discoverableProviders = new Set();
       for (const { id, config: providerConfig } of internalProviders) {
         try {
-          registry.registerProvider(id, mistralVibeProviderConfig(), `${PLUGIN_SOURCE}:internal`);
+          registry.registerProvider(id, prepareProvider(id, providerConfig), `${PLUGIN_SOURCE}:internal`);
           if (providerConfig.oauth) bridgeOauth(id, providerConfig.oauth);
           sources.add(`${PLUGIN_SOURCE}:internal`);
           if (typeof providerConfig.fetchDynamicModels === "function") discoverableProviders.add(id);

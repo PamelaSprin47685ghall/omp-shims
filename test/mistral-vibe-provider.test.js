@@ -233,7 +233,8 @@ describe("Mistral Vibe provider", () => {
   test("registers Vibe's current model on the standard Mistral chat transport", () => {
     const provider = mistralVibeProviderConfig();
     expect(provider.baseUrl).toBe(MISTRAL_VIBE_API_BASE);
-    expect(provider.api).toBe("openai-completions");
+    expect(provider.api).toBe("mistral-vibe-native");
+    expect(typeof provider.streamSimple).toBe("function");
     expect(provider.models).toHaveLength(1);
     expect(provider.models[0]).toMatchObject({
       id: MISTRAL_VIBE_MODEL_ID,
