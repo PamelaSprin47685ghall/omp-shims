@@ -78,12 +78,13 @@ describe("classifyFailure", () => {
     expect(classifyFailure(outcome({ status: 502, source: "stream", message }))).toBe(FAILURE.QUOTA);
   });
 
-  test("a provider plugin crash cools the unit instead of probing it again", () => {
+  test("a provider/host adapter bug is not quota and must never cool a valid account", () => {
     for (const message of [
       "undefined is not an object (evaluating 'e.content.length')",
       'No transport registered for api "openai-responses". The provider plugin must be loaded before streaming.',
     ]) {
-      expect(classifyFailure(outcome({ status: 502, source: "stream", message }))).toBe(FAILURE.QUOTA);
+      expect(classifyFailure(outcome({ status: 502, source: "stream", message }))).toBe(FAILURE.ADAPTER);
+      expect(classifyFailure(outcome({ status: 502, source: "gateway", message }))).toBe(FAILURE.ADAPTER);
     }
   });
 

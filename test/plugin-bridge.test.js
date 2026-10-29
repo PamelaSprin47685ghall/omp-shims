@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { install, makeTokenResolver, normalizeQoderCapacityEvent } from "../features/plugin-bridge.js";
+import { install, makeTokenResolver, normalizeQoderCapacityEvent, normalizeNativeMistralEvent } from "../features/plugin-bridge.js";
 import { tempDir } from "./helpers.js";
 
 const TOKEN = "tok_0123456789abcdefghijklmnop";
@@ -207,5 +207,40 @@ describe("registry hooks", () => {
     } finally {
       globalThis.__OMP_SHIMS_HOST__ = previousHost;
     }
+  });
+});
+
+describe("native Mistral stream events for OMP Gateway", () => {
+  test("text/thinking start and delta carry safe content for host consumers", () => {
+    for (const prefix of ["text", "thinking"]) {
+      const started = normalizeNativeMistralEvent({
+        type: prefix + "_start", contentIndex: 0, partial: { content: [] },
+      });
+      expect(started.content).toEqual([]);
+      const delta = normalizeNativeMistralEvent({
+        type: prefix + "_delta", delta: "visible", contentIndex: 0,
+      });
+      expect(delta.content).toBe("visible");
+      expect(delta.delta).toBe("visible");
+      const already = { type: prefix + "_delta", delta: "visible", content: "original" };
+      expect(normalizeNativeMistralEvent(already)).toBe(already);
+    }
+  });
+
+  test("end events carry the actual content blocks expected by OMP", () => {
+    expect(normalizeNativeMistralEvent({ type: "text_end", content: "YES" }).content)
+      .toEqual([{ type: "text", text: "YES" }]);
+    expect(normalizeNativeMistralEvent({ type: "thinking_end", content: "reason" }).content)
+      .toEqual([{ type: "thinking", thinking: "reason", thinkingSignature: "" }]);
+    const already = { type: "text_end", content: [{ type: "text", text: "YES" }] };
+    expect(normalizeNativeMistralEvent(already)).toBe(already);
+  });
+
+  test("tool events, terminal events and error objects remain untouched", () => {
+    for (const event of [
+      { type: "toolcall_end", toolCall: { id: "call_1", name: "run" } },
+      { type: "done", message: { content: [] } },
+      { type: "error", error: { message: "bad" } },
+    ]) expect(normalizeNativeMistralEvent(event)).toBe(event);
   });
 });

@@ -245,6 +245,34 @@ function normalizeCommandCodeContext(context) {
   return { ...context, messages };
 }
 
+/** Adapt pi-ai stream events at the gateway boundary, before the host reads
+ * event.content.length. Some host variants check that field on start/delta
+ * events too; the original pi-ai events only set delta/partial. This is scoped
+ * to the Mistral native adapter so unrelated transports are unchanged.
+ */
+export function normalizeNativeMistralEvent(event) {
+  if (!event || typeof event !== "object") return event;
+  if (event.type === "text_end" || event.type === "thinking_end") {
+    if (Array.isArray(event.content)) return event;
+    const text = typeof event.content === "string" ? event.content : (event.content?.text ?? "");
+    const block = event.type === "thinking_end"
+      ? { type: "thinking", thinking: text, thinkingSignature: event.thinkingSignature ?? "" }
+      : { type: "text", text };
+    return { ...event, content: [block] };
+  }
+  // OMP's consumer can inspect .content even for a *_start or *_delta
+  // emitted by the standard pi-ai serializer, which has no such property.
+  if (event.type === "text_start" || event.type === "thinking_start") {
+    return event.content === undefined ? { ...event, content: [] } : event;
+  }
+  if (event.type === "text_delta" || event.type === "thinking_delta") {
+    return event.content === undefined
+      ? { ...event, content: typeof event.delta === "string" ? event.delta : "" }
+      : event;
+  }
+  return event;
+}
+
 function wrapTransportEvents(transport, provider) {
   return function wrappedStreamSimple(model, context, options) {
     const nextContext = provider === "commandcode" ? normalizeCommandCodeContext(context) : context;
@@ -265,6 +293,9 @@ function wrapTransportEvents(transport, provider) {
     const originalPush = stream.push.bind(stream);
     stream.push = (event) => {
       event = normalizeQoderCapacityEvent(provider, event);
+      if (provider === MISTRAL_VIBE_PROVIDER_ID) {
+        return originalPush(normalizeNativeMistralEvent(event));
+      }
       if (event?.type !== "text_end" && event?.type !== "thinking_end") return originalPush(event);
       if (Array.isArray(event.content)) return originalPush(event);
       const { content, ...rest } = event;

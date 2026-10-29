@@ -84,11 +84,49 @@
       }
     },
     "lazy/task": {
-      "displayName": "Lazy Task · Mistral GLM 5.3 Flash",
+      "displayName": "Lazy Task · GLM Flash + DeepSeek",
       "graph": {
-        "type": "model",
-        "model": "mistral-vibe/zai-glm-5-3-flash",
-        "effort": "high"
+        "type": "fallback",
+        "children": [
+          {
+            "type": "model",
+            "model": "mistral-vibe/zai-glm-5-3-flash",
+            "effort": "high"
+          },
+          {
+            "type": "rating",
+            "children": [
+              {
+                "type": "model",
+                "model": "mistral-vibe/deepseek-v4-1-flash-1017",
+                "effort": "max"
+              },
+              {
+                "type": "model",
+                "model": "charm-hyper/deepseek-v4.1-flash-1017",
+                "effort": "max"
+              },
+              {
+                "type": "model",
+                "model": "opencode-go/deepseek-v4.1-flash",
+                "effort": "max",
+                "offPeakOnly": "deepseek"
+              },
+              {
+                "type": "model",
+                "model": "ollama-cloud/deepseek-v4.1-flash:1017",
+                "effort": "max",
+                "offPeakOnly": "ollama"
+              },
+              {
+                "type": "model",
+                "model": "cline-pass/deepseek-v4.1-flash-1017",
+                "effort": "max",
+                "offPeakOnly": "ollama"
+              }
+            ]
+          }
+        ]
       }
     }
   }
