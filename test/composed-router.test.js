@@ -120,9 +120,9 @@ describe("recursive keyed-model algebra", () => {
     expect(raw.filter((c) => c.model === "google-antigravity/gemini-4-argon")).toHaveLength(2);
   });
 
-  test("Lazy Task prioritizes GLM, retaining every original DeepSeek model and off-peak gate", () => {
+  test("Lazy Task lets GLM Flash and all five original DeepSeek models compete in one rating pool", () => {
     const glm = "mistral-vibe/zai-glm-5-3-flash";
-    const allDeepSeek = [
+    const deepseek = [
       "mistral-vibe/deepseek-v4-1-flash-1017",
       "charm-hyper/deepseek-v4.1-flash-1017",
       "opencode-go/deepseek-v4.1-flash",
@@ -132,23 +132,25 @@ describe("recursive keyed-model algebra", () => {
     const at = when("2026-10-31T14:00:00Z");
     const candidates = policy.candidates("lazy/task", "peak", units, at).candidates;
     expect(candidates.filter((c) => c.model === glm)).toHaveLength(2);
-    expect(new Set(candidates.map((c) => c.model))).toEqual(new Set([glm, ...allDeepSeek]));
-    expect(ranked("lazy/task", at).slice(0,2).map((c) => c.model)).toEqual([glm, glm]);
-    // All GLM keys failed: the old DeepSeek rating graph still works as a backup.
-    const backups = ranked("lazy/task", at, {
-      available: (c) => c.model !== glm,
-    });
-    expect(backups).toHaveLength(candidates.length-2);
-    expect(backups.every((c) => c.model !== glm)).toBe(true);
+    expect(new Set(candidates.map((c) => c.model))).toEqual(new Set([glm, ...deepseek]));
     const topology = policy.routeTopology()["lazy/task"].graph;
-    expect(topology.type).toBe("fallback");
-    expect(topology.children[0].model).toBe(glm);
-    expect(topology.children[1].type).toBe("rating");
-    expect(topology.children[1].children.map((c) => c.model)).toEqual(allDeepSeek);
-    const peak = policy.candidates("lazy/task", "peak", units, when("2026-10-29T02:00:00Z")).candidates;
-    expect(peak.some((c) => c.model === "opencode-go/deepseek-v4.1-flash")).toBe(false);
-    const evening = policy.candidates("lazy/task", "peak", units, when("2026-10-29T14:00:00Z")).candidates;
-    expect(evening.some((c) => c.model === "ollama-cloud/deepseek-v4.1-flash:1017")).toBe(false);
+    expect(topology.type).toBe("rating");
+    expect(topology.children.map((c) => c.model)).toEqual([glm, ...deepseek]);
+    // Neither model is forced ahead. The same scoring mechanism may pick either.
+    const fast = (fastModel) => ranked("lazy/task", at, {
+      random: () => 0.5,
+      speed: { predict(model) {
+        return { totalMs: model === fastModel ? 10 : 100000, rd: 0.1, weight: 100 };
+      } },
+    });
+    expect(fast(glm)[0].model).toBe(glm);
+    expect(fast(deepseek[0])[0].model).toBe(deepseek[0]);
+    const activePeak = policy.candidates("lazy/task", "peak", units,
+      when("2026-10-29T02:00:00Z")).candidates;
+    expect(activePeak.some((c) => c.model === deepseek[2])).toBe(false);
+    const ollamaPeak = policy.candidates("lazy/task", "peak", units,
+      when("2026-10-29T14:00:00Z")).candidates;
+    expect(ollamaPeak.some((c) => c.model === deepseek[3])).toBe(false);
   });
 
   test("model rating compares only predicted completion time, never configured intelligence or cost", () => {
@@ -177,8 +179,8 @@ describe("recursive keyed-model algebra", () => {
         cachedShare: (c) => c.unit.key === "m2" ? 0.5 : 0,
         cachedBytes: (c) => c.unit.key === "m2" ? 30000 : 0,
       });
-      expect(warm.slice(0,2).map((c) => c.unit.key)).toEqual(["m2", "m1"]);
-      expect(warm.slice(2).every((c) => c.model !== "mistral-vibe/zai-glm-5-3-flash")).toBe(true);
+      const glmKeys = warm.filter((c) => c.model === "mistral-vibe/zai-glm-5-3-flash");
+      expect(glmKeys.map((c) => c.unit.key)).toEqual(["m2", "m1"]);
     }
     // When the warm account fails, the other account remains available.
     expect(ranked("lazy/task", at, {
@@ -194,7 +196,7 @@ describe("recursive keyed-model algebra", () => {
     expect(topology["lazy/pro"].graph.type).toBe("rating");
     expect(topology["lazy/pro"].graph.children[2].type).toBe("fallback");
     expect(topology["lazy/default"].graph.type).toBe("fallback");
-    expect(topology["lazy/task"].graph.type).toBe("fallback");
+    expect(topology["lazy/task"].graph.type).toBe("rating");
     expect(JSON.stringify(topology)).not.toContain("credentialId");
   });
 

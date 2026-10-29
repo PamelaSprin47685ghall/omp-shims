@@ -84,9 +84,9 @@
       }
     },
     "lazy/task": {
-      "displayName": "Lazy Task · GLM Flash + DeepSeek",
+      "displayName": "Lazy Task · GLM Flash + DeepSeek (competitive)",
       "graph": {
-        "type": "fallback",
+        "type": "rating",
         "children": [
           {
             "type": "model",
@@ -94,37 +94,32 @@
             "effort": "high"
           },
           {
-            "type": "rating",
-            "children": [
-              {
-                "type": "model",
-                "model": "mistral-vibe/deepseek-v4-1-flash-1017",
-                "effort": "max"
-              },
-              {
-                "type": "model",
-                "model": "charm-hyper/deepseek-v4.1-flash-1017",
-                "effort": "max"
-              },
-              {
-                "type": "model",
-                "model": "opencode-go/deepseek-v4.1-flash",
-                "effort": "max",
-                "offPeakOnly": "deepseek"
-              },
-              {
-                "type": "model",
-                "model": "ollama-cloud/deepseek-v4.1-flash:1017",
-                "effort": "max",
-                "offPeakOnly": "ollama"
-              },
-              {
-                "type": "model",
-                "model": "cline-pass/deepseek-v4.1-flash-1017",
-                "effort": "max",
-                "offPeakOnly": "ollama"
-              }
-            ]
+            "type": "model",
+            "model": "mistral-vibe/deepseek-v4-1-flash-1017",
+            "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "charm-hyper/deepseek-v4.1-flash-1017",
+            "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "effort": "max",
+            "offPeakOnly": "deepseek"
+          },
+          {
+            "type": "model",
+            "model": "ollama-cloud/deepseek-v4.1-flash:1017",
+            "effort": "max",
+            "offPeakOnly": "ollama"
+          },
+          {
+            "type": "model",
+            "model": "cline-pass/deepseek-v4.1-flash-1017",
+            "effort": "max",
+            "offPeakOnly": "ollama"
           }
         ]
       }
