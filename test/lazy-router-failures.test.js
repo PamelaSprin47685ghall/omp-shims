@@ -52,6 +52,16 @@ describe("classifyFailure", () => {
     expect(classifyFailure(outcome({ status: 503, source: "upstream", message: "overloaded" }))).toBe(FAILURE.UNIT);
   });
 
+  test("temporary limits receive a short probe, while quota and unknown 429 stay unchanged", () => {
+    expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "Too Many Requests" }), undefined, "mistral-vibe")).toBe(FAILURE.THROTTLE);
+    expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "Monthly usage limit reached" }), undefined, "mistral-vibe")).toBe(FAILURE.QUOTA);
+    expect(classifyFailure(outcome({ status: 402, source: "upstream", message: "Vibe budget exhausted" }), undefined, "mistral-vibe")).toBe(FAILURE.QUOTA);
+    expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "requests per minute limit" }), undefined, "ollama-cloud")).toBe(FAILURE.THROTTLE);
+    expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "Too Many Requests" }), undefined, "openai-codex")).toBe(FAILURE.UNIT);
+    expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "Too Many Requests" }, false), undefined, "mistral-vibe")).toBe(FAILURE.UNIT);
+    expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "User Provided API Key Rate Limit Exceeded" }), undefined, "cline-pass")).toBe(FAILURE.QUOTA);
+  });
+
   test("qoder's reformatted quota codes cool the unit without a probe", () => {
     for (const message of [
       "[Qoder quota limit] Daily call allowance exhausted (Billing daily count exceeded, code 110)",

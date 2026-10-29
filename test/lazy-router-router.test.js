@@ -54,6 +54,16 @@ const CATALOG = {
     canDisable: false,
     baseUrl: "https://ctyun.example/v1",
   },
+  "mistral-vibe/deepseek-v4-1-flash-1017": {
+    ref: "mistral-vibe/deepseek-v4-1-flash-1017",
+    provider: "mistral-vibe",
+    contextWindow: 1_000_000,
+    input: ["text"],
+    reasoning: false,
+    efforts: [],
+    canDisable: false,
+    baseUrl: "https://mistral-vibe.example/v1",
+  },
   "p/quarter": {
     ref: "p/quarter",
     provider: "p",
@@ -244,6 +254,40 @@ describe("LazyRouter", () => {
     expect(body.error.type).toBe("upstream_error");
     expect(body.error.message).toContain("q q/text");
     expect(h.names().at(-1)).toBe("exhausted");
+  });
+
+  test("Mistral temporary 429 does not probe immediately; 30s background probe restores it", async () => {
+    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const custom = {
+      ...POLICY,
+      routes: { default: {
+        selection: "ordered",
+        input: ["text"],
+        periods: { peak: [{ model }, { model: "q/text" }] },
+      } },
+    };
+    let throttled = true;
+    const h = harness({ policy: custom, upstream: (call) =>
+      call.unit === "mistral-vibe" && throttled
+        ? new Response('{"error":"Too Many Requests"}', { status: 429 })
+        : ok(),
+    });
+    const first = await h.send({});
+    expect(first.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
+    expect(h.calls.map((c) => c.unit)).toEqual(["mistral-vibe", "q"]);
+    expect(h.names()).not.toContain("probe");
+    const cooled = h.health.entry("mistral-vibe " + model);
+    expect(cooled).toBeDefined();
+    expect(cooled.reason).toContain("throttle:");
+    expect(cooled.probeIntervalMs).toBe(30_000);
+    expect(cooled.nextProbeAt - cooled.since).toBe(30_000);
+
+    throttled = false;
+    await h.timers[0]();
+    expect(h.health.isAlive("mistral-vibe " + model)).toBe(true);
+    const restored = await h.send({});
+    expect(restored.headers.get(SERVED_BY_HEADERS.model)).toBe(model);
+    expect(h.names()).toContain("cooldown-exit");
   });
 
   test("a failed background probe stays quiet while remaining scheduled", async () => {
