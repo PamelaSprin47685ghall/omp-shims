@@ -36,19 +36,17 @@ function ranked(route, at, options = {}) {
 }
 
 describe("recursive keyed-model algebra", () => {
-  test("five Lazy routes and two exact Rush aliases exist", () => {
+  test("only five Lazy routes exist", () => {
     expect(policy.routeNames).toEqual([
-      "lazy/pro", "lazy/batch-blind", "lazy/weak",
-      "lazy/default", "lazy/task", "rush/default", "rush/task",
+      "lazy/pro", "lazy/batch-blind", "lazy/weak", "lazy/default", "lazy/task",
     ]);
-    for (const name of ["weak/task", "rush/vision", "lazy/vision", "weak/default", "lazy/flash"]) expect(policy.routeFor(name)).toBeUndefined();
+    for (const name of ["weak/task", "rush/default", "rush/task", "rush/vision", "lazy/vision", "weak/default", "lazy/flash"]) expect(policy.routeFor(name)).toBeUndefined();
   });
 
   test("all Plus keys precede all Pro keys, even when Pro has better predicted speed", () => {
     const at = when("2026-10-29T12:00:00Z");
     const expected = ["plus", "plus", "pro"];
     expect(ranked("lazy/default", at).map((c) => c.unit.tier)).toEqual(expected);
-    expect(ranked("rush/default", at).map((c) => c.unit.tier)).toEqual(expected);
     expect(ranked("lazy/default", at, { available: (c) => c.unit.key !== "plus1" }).map((c) => c.unit.key)).toEqual(["plus2", "pro1"]);
     expect(ranked("lazy/default", at, { available: (c) => c.unit.tier !== "plus" }).map((c) => c.unit.key)).toEqual(["pro1"]);
   });
@@ -87,21 +85,12 @@ describe("recursive keyed-model algebra", () => {
     expect(tracker.inFlight(second)).toBe(0);
   });
 
-  test("both task aliases share the same Key/model capacity identity", () => {
-    const at = when("2026-10-29T12:00:00Z");
-    const find = (route) => policy.candidates(route, "peak", units, at).candidates.find(
-      (c) => c.model === "mistral-vibe/deepseek-v4-1-flash-1017" && c.unit.key === "m1"
-    );
-    expect(policy.capacityUnit(find("lazy/task")).key)
-      .toBe(policy.capacityUnit(find("rush/task")).key);
-  });
-
-  test("Rush/task is an alias; multiple Mistral keys receive one shared speed prediction", () => {
+  test("multiple Mistral keys receive one shared speed prediction", () => {
     const at = when("2026-10-29T12:00:00Z");
     const model = "mistral-vibe/deepseek-v4-1-flash-1017";
     const calls = [];
     const speed = { predict(name) { calls.push(name); return { totalMs: 2300, rd: 0.2, weight: 90 }; } };
-    const result = ranked("rush/task", at, { speed });
+    const result = ranked("lazy/task", at, { speed });
     expect(result.filter((c) => c.model === model)).toHaveLength(2);
     expect(ranked("lazy/task", at, { speed }).filter((c) => c.model === model)).toHaveLength(2);
     expect(calls.length).toBeGreaterThan(0);
@@ -143,7 +132,6 @@ describe("recursive keyed-model algebra", () => {
       "ollama-cloud/deepseek-v4.1-flash:1017",
       "cline-pass/deepseek-v4.1-flash-1017",
     ]) expect(all.has(model)).toBe(true);
-    expect(new Set(policy.candidates("rush/task", "peak", units, when("2026-10-31T14:00:00Z")).candidates.map((c) => c.model))).toEqual(all);
     expect(ids("2026-10-29T02:00:00Z").has("opencode-go/deepseek-v4.1-flash")).toBe(false);
     expect(ids("2026-10-29T14:00:00Z").has("ollama-cloud/deepseek-v4.1-flash:1017")).toBe(false);
   });
@@ -176,6 +164,16 @@ describe("recursive keyed-model algebra", () => {
     expect(ollamaPeak.some((s) => s.startsWith("cline-pass/"))).toBe(false);
     expect(ollamaPeak.some((s) => s.startsWith("opencode-go/"))).toBe(true);
     expect(new Set(id("2026-10-31T14:00:00Z"))).toHaveLength(5);
+  });
+
+  test("topology exposes nested rating, fallback and model leaves", () => {
+    const topology = policy.routeTopology();
+    expect(Object.keys(topology)).toEqual(policy.routeNames);
+    expect(topology["lazy/pro"].graph.type).toBe("rating");
+    expect(topology["lazy/pro"].graph.children[2].type).toBe("fallback");
+    expect(topology["lazy/default"].graph.type).toBe("fallback");
+    expect(topology["lazy/task"].graph.children).toHaveLength(5);
+    expect(JSON.stringify(topology)).not.toContain("credentialId");
   });
 
   test("unknown aliases and circular trees are rejected", () => {

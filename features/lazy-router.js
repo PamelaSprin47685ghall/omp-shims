@@ -62,6 +62,7 @@ import { ProviderConcurrencyProof } from "../lib/lazy-router/provider-concurrenc
 import { loadPolicyData, RoutePolicy } from "../lib/lazy-router/policy.js";
 import { ComposedPolicy, loadCompositionData } from "../lib/lazy-router/composed-policy.js";
 import { CyclicSpeed } from "../lib/lazy-router/cyclic-speed.js";
+import { TokenTotals } from "../lib/lazy-router/token-totals.js";
 import { LazyRouter } from "../lib/lazy-router/router.js";
 import { createStatusPage } from "../lib/lazy-router/status-page.js";
 import { TierDirectory } from "../lib/lazy-router/tiers.js";
@@ -129,6 +130,8 @@ export function createLazyRouter(config, { log = report } = {}) {
   const speed = new CyclicSpeed({
     statePath: config.speedStatePath ?? process.env.OMP_SHIMS_LAZY_CYCLIC_SPEED_STATE_PATH ?? join(ompDir, "lazy-router-cyclic-speed.json"),
   });
+  const tokenTotals = new TokenTotals({ path: config.tokenTotalsPath ??
+    process.env.OMP_SHIMS_LAZY_TOKEN_TOTALS_PATH ?? join(ompDir, "lazy-router-token-totals.sqlite") });
   const router = new LazyRouter({
     policy,
     units,
@@ -146,6 +149,7 @@ export function createLazyRouter(config, { log = report } = {}) {
     admission: new AdmissionControl({ windowMs: config.admissionWindowMs }),
     perf,
     speed,
+    tokenTotals,
     concurrencyProof,
     credentials,
     emit,

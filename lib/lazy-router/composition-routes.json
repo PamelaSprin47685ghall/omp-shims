@@ -117,14 +117,6 @@
           }
         ]
       }
-    },
-    "rush/default": {
-      "displayName": "Rush Default (alias)",
-      "alias": "lazy/default"
-    },
-    "rush/task": {
-      "displayName": "Rush Task (alias)",
-      "alias": "lazy/task"
     }
   }
 }
