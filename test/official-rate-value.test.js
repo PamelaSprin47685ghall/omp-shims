@@ -17,6 +17,56 @@ describe("published model API price equivalent, never actual subscription billin
     expect(x.ratesAsOf).toBe(OFFICIAL_RATE_DATE);
     expect(x.models[0].source).toContain("mistral.ai");
   });
+  test("all active Lazy route models have an official API reference rate", () => {
+    const policy = new ComposedPolicy();
+    const known = new Set();
+    const collect = (node) => {
+      if (node.type === "model") { known.add(node.model); return; }
+      for (const child of node.children ?? []) collect(child);
+    };
+    for (const route of Object.values(policy.routeTopology())) collect(route.graph);
+    const priced = officialApiEquivalent([...known].map(model => ({ model, uncachedInput: 1 })));
+    expect(priced.unpricedModels).toBe(0);
+    expect(priced.totalModels).toBe(known.size);
+  });
+  test("all direct models in current models.yml and historic Sol have official references", () => {
+    const ids = [
+      "ctyun/glm-5.3-oc",
+      "ctyun/glm-5.3-flash",
+      "ctyun/deepseek-v4.1-flash",
+      "google-antigravity/gemini-3.8-flash",
+      "xai-oauth/grok-4.7",
+      "openai-api/gpt-6.1-terra",
+      "openai-codex/gpt-6.1-sol",
+      "openai-codex/gpt-6-astra",
+      "openai-codex/gpt-6-luna",
+      "mistral-vibe/zai-glm-5-3",
+    ];
+    const prices = officialApiEquivalent(ids.map(model => ({ model, uncachedInput: 1_000_000 })));
+    expect(prices.unpricedModels).toBe(0);
+    expect(prices.totalModels).toBe(ids.length);
+    for (const entry of prices.models) {
+      expect(entry.priced).toBe(true);
+      expect(entry.source).toMatch(/^https:\/\//);
+      expect(entry.perMillion.uncachedInput).toBeGreaterThan(0);
+    }
+  });
+  test("known vendor reference rates and per-provider differences match official pages", () => {
+    const ids = [
+      ["ctyun/glm-5.3-oc", [1.4, .26, 4.4]],
+      ["ctyun/glm-5.3-flash", [.15, .03, .5]],
+      ["google-antigravity/gemini-3.8-flash", [.75, .075, 3.75]],
+      ["xai-oauth/grok-4.7", [2, .5, 6]],
+      ["openai-codex/gpt-6.1-sol", [2, .1, 10]],
+      ["openai-codex/gpt-6-astra", [10, 1, 50]],
+      ["openai-codex/gpt-6-luna", [.1, .01, .5]],
+      ["mistral-vibe/zai-glm-5-3", [1.4, .14, 4.4]],
+    ];
+    for (const [model, expected] of ids) {
+      const row = officialApiEquivalent([{model, uncachedInput:1,cachedInput:1,output:1}]).models[0];
+      expect([row.perMillion.uncachedInput,row.perMillion.cachedInput,row.perMillion.output]).toEqual(expected);
+    }
+  });
   test("Terra Codex reference Standard and OpenAI Flex are charged as different equivalents", () => {
     const million={uncachedInput:1_000_000,cachedInput:1_000_000,output:1_000_000};
     const x=officialApiEquivalent([
