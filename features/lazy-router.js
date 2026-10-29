@@ -58,6 +58,7 @@ import { FaultInjector } from "../lib/lazy-router/faults.js";
 import { formatForPath } from "../lib/lazy-router/formats.js";
 import { HealthRegistry } from "../lib/lazy-router/health.js";
 import { ModelPerf } from "../lib/lazy-router/perf.js";
+import { ProviderConcurrencyProof } from "../lib/lazy-router/provider-concurrency-proof.js";
 import { loadPolicyData, RoutePolicy } from "../lib/lazy-router/policy.js";
 import { ComposedPolicy, loadCompositionData } from "../lib/lazy-router/composed-policy.js";
 import { CyclicSpeed } from "../lib/lazy-router/cyclic-speed.js";
@@ -92,6 +93,10 @@ export function createLazyRouter(config, { log = report } = {}) {
   const policy = config.routesFile ? new RoutePolicy(policyData) : new ComposedPolicy(policyData, { calendar });
   const schedule = new PeakSchedule({ calendar, windows: policy.peakWindows ?? loadPolicyData().peakWindows });
   const emit = createEventLog({ out: config.out ?? process.env.OMP_SHIMS_LAZY_EVENT_LOG_PATH ?? join(ompDir, "logs", "lazy-router.jsonl"), report: log });
+  const concurrencyProof = new ProviderConcurrencyProof({
+    statePath: config.concurrencyProofStatePath ?? process.env.OMP_SHIMS_LAZY_CONCURRENCY_PROOF_STATE_PATH ?? join(ompDir, "lazy-router-concurrency-proof.json"),
+    onProof: (evidence) => emit("provider-concurrency-proof", evidence),
+  });
   const tokenPath = config.gatewayTokenPath ?? join(ompDir, "auth-gateway.token");
 
   const credentials = new CredentialStore({
@@ -141,6 +146,7 @@ export function createLazyRouter(config, { log = report } = {}) {
     admission: new AdmissionControl({ windowMs: config.admissionWindowMs }),
     perf,
     speed,
+    concurrencyProof,
     credentials,
     emit,
     settings: {
@@ -217,7 +223,14 @@ export function lazyRouterHandler(
       const startedAt = Date.now();
       const usage = text ? withUsageRequest(pathname, text) : undefined;
       const forwarded = usage === undefined ? request : withBody(request, usage);
-      return router.measureDirect(body?.model, await handler(forwarded, server), startedAt, format, request.signal);
+      const proof = router.beginDirectProof(body?.model);
+      try {
+        const answer = await handler(forwarded, server);
+        return router.measureDirect(body?.model, answer, startedAt, format, request.signal, proof);
+      } catch (error) {
+        proof?.finish(false);
+        throw error;
+      }
     }
     return router.serve(format, body, request);
   };
