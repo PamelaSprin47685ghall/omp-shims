@@ -12,6 +12,8 @@ import {
   MISTRAL_VIBE_PROVIDER_ID,
   mistralVibeProviderConfig,
   normalizeMistralVibeSse,
+  replayMistralThinking,
+  normalizeMistralRequestBody,
 } from "../lib/mistral-vibe-provider.js";
 
 const reply = (body, status = 200) =>
@@ -109,6 +111,84 @@ describe("Mistral Vibe native prefix-cache compatibility", () => {
     };
     await expect(handlers[0](original, undefined, upstream)).rejects.toThrow("upstream failed");
     expect(calls).toBe(1);
+  });
+});
+
+describe("Mistral native multi-turn request compatibility", () => {
+  const assistant = {
+    role: "assistant", content: "The answer is 42",
+    reasoning_content: "First verify the arithmetic",
+    tool_calls: [{ id: "call_1", type: "function",
+      function: { name: "calculate", arguments: JSON.stringify({ x: 42 }) } }],
+  };
+
+  test("replays completed thinking in the official Vibe content union", () => {
+    const out = replayMistralThinking([assistant]);
+    expect(out[0].content).toEqual([
+      { type: "thinking", thinking: [{ type: "text", text: "First verify the arithmetic" }] },
+      { type: "text", text: "The answer is 42" },
+    ]);
+    expect(out[0].reasoning_content).toBeUndefined();
+    expect(out[0].tool_calls).toEqual(assistant.tool_calls);
+    expect(assistant.content).toBe("The answer is 42");
+    expect(replayMistralThinking([assistant], { reasoningEffort: "none" })).toBeUndefined();
+  });
+
+  test("preserves native blocks and avoids sending duplicate reasoning", () => {
+    const content = [
+      { type: "thinking", thinking: [{ type: "text", text: "native reasoning" }], signature: "sig" },
+      { type: "text", text: "visible" },
+    ];
+    const output = replayMistralThinking([{ role: "assistant", content,
+      reasoning_content: "duplicate reasoning" }]);
+    expect(output[0].content).toEqual(content);
+    expect(output[0].reasoning_content).toBeUndefined();
+    expect(replayMistralThinking([{ role: "assistant", content }])).toBeUndefined();
+  });
+
+  test("keeps tool-only and non-text messages intact", () => {
+    expect(replayMistralThinking([{ role: "tool", content: "result" },
+      { role: "assistant", tool_calls: [{ id: "x" }] }])).toBeUndefined();
+    expect(replayMistralThinking([{ role: "assistant", content: [{ type: "image_url",
+      image_url: { url: "data:image/png;base64,123" } }], reasoning_content: "reason" }]))
+      .toBeUndefined();
+  });
+
+  test("translates thinking even when caller supplies a prompt_cache_key", () => {
+    const body = JSON.stringify({
+      model: "deepseek-v4-1-flash-1017", messages: [
+        { role: "user", content: "Start" },
+        assistant,
+        { role: "tool", tool_call_id: "call_1", content: "42" },
+        { role: "user", content: "Continue" },
+      ],
+      prompt_cache_key: "caller-key",
+    });
+    const result = JSON.parse(normalizeMistralRequestBody(body));
+    expect(result.prompt_cache_key).toBe("caller-key");
+    expect(result.messages[1].content[0].type).toBe("thinking");
+    expect(result.messages[0].content).toBe("Start");
+  });
+
+  test("the fetch boundary sends the official native request shape once", async () => {
+    const handlers = [];
+    installMistralVibeResponseAdapter({ addFetchHandler: (handler) => handlers.push(handler) });
+    const input = JSON.stringify({ model: "deepseek-v4-1-flash-1017",
+      messages: [{ role: "user", content: "Hello" }, assistant],
+      stream: true });
+    const captured = [];
+    const upstream = async (_target, init) => {
+      captured.push(JSON.parse(init.body));
+      return new Response("data: [DONE]\\n\\n", {headers: {"content-type":"text/event-stream"}});
+    };
+    const response = await handlers[0]("https://api.mistral.ai/v1/chat/completions",
+      { body: input, method: "POST" }, upstream);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].messages[1].content[0]).toEqual({
+      type:"thinking", thinking:[{ type:"text", text:"First verify the arithmetic" }]
+    });
+    expect(captured[0].prompt_cache_key).toStartWith("omp-");
+    await response.text();
   });
 });
 
