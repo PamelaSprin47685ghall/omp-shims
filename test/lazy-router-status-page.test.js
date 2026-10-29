@@ -61,6 +61,25 @@ function inbound() {
 describe("clean-break dashboard", () => {
   test("server renders all counts and measured speed, with coverage and measurement start", () => {
     expect(html).toContain("123,456");
+    const priced = renderStatusPage({ ...STATUS, tokenTotals: {
+      ...STATUS.tokenTotals,
+      officialValue: {
+        currency:"USD", valueUsd:21.2537, pricedModels:2,totalModels:3,
+        unpricedModels:1,ratesAsOf:"2026-10-29",
+        note:"公式不包含真实渠道费用",
+        models:[{model:"mistral-vibe/zai-glm-5-3-flash",priced:true,valueUsd:21.2537,
+          source:"https://docs.mistral.ai/models/zai-glm-5-3-flash",
+          basis:"官方价",perMillion:{uncachedInput:.15,cachedInput:.03,output:.5}},
+          {model:"unpriced/model",priced:false,valueUsd:null,source:null,basis:"无可靠官方价格"}],
+      },
+    } },{statusPath:"/v1/lazy/status"});
+    expect(priced).toContain("累计官方 API 价格等效价值");
+    expect(priced).toContain("USD $21.2537");
+    expect(priced).toContain("官方定价覆盖 2 / 3");
+    expect(priced).toContain("各模型等效价值明细");
+    expect(priced).toContain("无可靠官方价格");
+    expect(priced).toContain("docs.mistral.ai");
+    expect(priced).toContain('id="value-details"');
     expect(html).toContain("路由前缀亲和命中率");
     expect(html).toContain("重置累积量");
     expect(html).not.toContain("前缀亲和命中</span>");
@@ -119,6 +138,7 @@ describe("clean-break dashboard", () => {
     const source = await Bun.file(new URL("../lib/lazy-router/status-page/client.js", import.meta.url)).text();
     expect(source).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
     expect(source).toContain("DOMParser");
+    expect(source).toContain('"value-details"');
     expect(source).toContain("confirm(");
     expect(source).toContain("prompt(");
     expect(source).toContain("authorization:");
