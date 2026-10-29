@@ -106,7 +106,7 @@
             "type": "model",
             "model": "cline-pass/deepseek-v4.1-flash-1017",
             "effort": "max",
-            "offPeakOnly": "ollama"
+            "offPeakOnly": "deepseek"
           },
           {
             "type": "model",

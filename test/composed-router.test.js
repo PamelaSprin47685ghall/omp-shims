@@ -164,6 +164,32 @@ describe("recursive keyed-model algebra", () => {
     expect(result[0].model).toBe("google-antigravity/gemini-4-argon");
   });
 
+  test("Cline Pass DeepSeek follows official DeepSeek windows, never Ollama windows", () => {
+    const cline = "cline-pass/deepseek-v4.1-flash-1017";
+    const ollama = "ollama-cloud/deepseek-v4.1-flash:1017";
+    const opencode = "opencode-go/deepseek-v4.1-flash";
+    const configured = policy.routeTopology()["lazy/task"].graph.children;
+    expect(configured.find((c) => c.model === cline)?.offPeakOnly).toBe("deepseek");
+    expect(configured.find((c) => c.model === ollama)?.offPeakOnly).toBe("ollama");
+    const eligible = (at) => new Set(
+      policy.candidates("lazy/task", "peak", units, when(at)).candidates.map((c) => c.model));
+    const dsPeak = eligible("2026-10-29T02:00:00Z"); // DeepSeek peak, Ollama off-peak
+    expect(dsPeak.has(cline)).toBe(false);
+    expect(dsPeak.has(opencode)).toBe(false);
+    expect(dsPeak.has(ollama)).toBe(true);
+    const ollamaPeak = eligible("2026-10-29T14:00:00Z"); // Ollama peak, DeepSeek off-peak
+    expect(ollamaPeak.has(cline)).toBe(true);
+    expect(ollamaPeak.has(opencode)).toBe(true);
+    expect(ollamaPeak.has(ollama)).toBe(false);
+    const holiday = new ComposedPolicy(undefined, {
+      calendar: { days: new Map([["2026-10-29", { kind: "holiday" }]]) },
+    });
+    const holidaySet = new Set(holiday.candidates("lazy/task", "peak", units,
+      when("2026-10-29T02:00:00Z")).candidates.map((c) => c.model));
+    expect(holidaySet.has(cline)).toBe(true);
+    expect(holidaySet.has(opencode)).toBe(true);
+  });
+
   test("DeepSeek and Ollama peak windows differ and are end-exclusive", () => {
     expect(isDeepSeekPeak(when("2026-10-29T01:00:00Z"))).toBe(true);
     expect(isDeepSeekPeak(when("2026-10-29T04:00:00Z"))).toBe(false);
