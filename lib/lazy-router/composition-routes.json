@@ -24,47 +24,21 @@
             "effort": "medium"
           },
           {
-            "type": "model",
-            "model": "google-antigravity/gemini-4-argon",
-            "tier": "ultra",
-            "effort": "medium"
-          }
-        ]
-      }
-    },
-    "lazy/flash": {
-      "displayName": "Lazy Flash",
-      "graph": {
-        "type": "rating",
-        "children": [
-          {
-            "type": "model",
-            "model": "google-antigravity/gemini-3.8-flash",
-            "tier": "pro",
-            "effort": "high"
-          },
-          {
-            "type": "model",
-            "model": "charm-hyper/deepseek-v4.1-flash-1017",
-            "effort": "max"
-          },
-          {
-            "type": "model",
-            "model": "opencode-go/deepseek-v4.1-flash",
-            "effort": "max",
-            "offPeakOnly": "deepseek"
-          },
-          {
-            "type": "model",
-            "model": "ollama-cloud/deepseek-v4.1-flash:1017",
-            "effort": "max",
-            "offPeakOnly": "ollama"
-          },
-          {
-            "type": "model",
-            "model": "cline-pass/deepseek-v4.1-flash-1017",
-            "effort": "max",
-            "offPeakOnly": "ollama"
+            "type": "fallback",
+            "children": [
+              {
+                "type": "model",
+                "model": "google-antigravity/gemini-4-argon",
+                "tier": "ultra",
+                "effort": "medium"
+              },
+              {
+                "type": "model",
+                "model": "google-antigravity/gemini-4-argon",
+                "tier": "pro",
+                "effort": "medium"
+              }
+            ]
           }
         ]
       }
@@ -108,11 +82,45 @@
       }
     },
     "lazy/task": {
-      "displayName": "Lazy Task",
+      "displayName": "Lazy Task · merged Flash",
       "graph": {
-        "type": "model",
-        "model": "mistral-vibe/deepseek-v4-1-flash-1017",
-        "effort": "max"
+        "type": "rating",
+        "children": [
+          {
+            "type": "model",
+            "model": "mistral-vibe/deepseek-v4-1-flash-1017",
+            "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "google-antigravity/gemini-3.8-flash",
+            "tier": "pro",
+            "effort": "high"
+          },
+          {
+            "type": "model",
+            "model": "charm-hyper/deepseek-v4.1-flash-1017",
+            "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "effort": "max",
+            "offPeakOnly": "deepseek"
+          },
+          {
+            "type": "model",
+            "model": "ollama-cloud/deepseek-v4.1-flash:1017",
+            "effort": "max",
+            "offPeakOnly": "ollama"
+          },
+          {
+            "type": "model",
+            "model": "cline-pass/deepseek-v4.1-flash-1017",
+            "effort": "max",
+            "offPeakOnly": "ollama"
+          }
+        ]
       }
     },
     "rush/default": {

@@ -35,12 +35,12 @@ function ranked(route, at, options = {}) {
 }
 
 describe("recursive keyed-model algebra", () => {
-  test("only six Lazy routes and two exact Rush aliases exist", () => {
+  test("five Lazy routes and two exact Rush aliases exist", () => {
     expect(policy.routeNames).toEqual([
-      "lazy/pro", "lazy/flash", "lazy/batch-blind", "lazy/weak",
+      "lazy/pro", "lazy/batch-blind", "lazy/weak",
       "lazy/default", "lazy/task", "rush/default", "rush/task",
     ]);
-    for (const name of ["weak/task", "rush/vision", "lazy/vision", "weak/default"]) expect(policy.routeFor(name)).toBeUndefined();
+    for (const name of ["weak/task", "rush/vision", "lazy/vision", "weak/default", "lazy/flash"]) expect(policy.routeFor(name)).toBeUndefined();
   });
 
   test("all Plus keys precede all Pro keys, even when Pro has better predicted speed", () => {
@@ -58,10 +58,11 @@ describe("recursive keyed-model algebra", () => {
     const calls = [];
     const speed = { predict(name) { calls.push(name); return { totalMs: 2300, rd: 0.2, weight: 90 }; } };
     const result = ranked("rush/task", at, { speed });
-    expect(result.map((c) => c.model)).toEqual([model, model]);
-    expect(ranked("lazy/task", at, { speed }).map((c) => c.model)).toEqual([model, model]);
+    expect(result.filter((c) => c.model === model)).toHaveLength(2);
+    expect(ranked("lazy/task", at, { speed }).filter((c) => c.model === model)).toHaveLength(2);
     expect(calls.length).toBeGreaterThan(0);
-    expect(new Set(calls)).toEqual(new Set([model]));
+    expect(calls).toContain(model);
+    expect(new Set(calls)).toContain("google-antigravity/gemini-3.8-flash");
   });
 
   test("key distribution is random and can preserve affinity via effective temperature", () => {
@@ -73,6 +74,34 @@ describe("recursive keyed-model algebra", () => {
       settings: { temperature: 0.6 },
     });
     expect(warm[0].unit.key).toBe("m1");
+  });
+
+  test("Argon uses one rated slot: Ultra first, Pro only after Ultra is unavailable", () => {
+    const at = when("2026-10-29T12:00:00Z");
+    const row = (available) => ranked("lazy/pro", at, {
+      settings: { temperature: 0 }, available,
+    }).filter((candidate) => candidate.model === "google-antigravity/gemini-4-argon");
+    expect(row(() => true).map((candidate) => candidate.unit.tier)).toEqual(["ultra", "pro"]);
+    expect(row((candidate) => candidate.unit.tier !== "ultra").map((candidate) => candidate.unit.tier)).toEqual(["pro"]);
+    const raw = policy.candidates("lazy/pro", "peak", units, at).candidates;
+    expect(raw.filter((c) => c.model === "google-antigravity/gemini-4-argon")).toHaveLength(2);
+  });
+
+  test("merged Lazy Task includes the old Flash candidates and preserves peak-price exclusions", () => {
+    const ids = (at) => new Set(policy.candidates("lazy/task", "peak", units, when(at)).candidates.map((c) => c.model));
+    const all = ids("2026-10-31T14:00:00Z");
+    expect(all.size).toBe(6);
+    expect(all.has("mistral-vibe/deepseek-v4-1-flash-1017")).toBe(true);
+    for (const model of [
+      "google-antigravity/gemini-3.8-flash",
+      "charm-hyper/deepseek-v4.1-flash-1017",
+      "opencode-go/deepseek-v4.1-flash",
+      "ollama-cloud/deepseek-v4.1-flash:1017",
+      "cline-pass/deepseek-v4.1-flash-1017",
+    ]) expect(all.has(model)).toBe(true);
+    expect(new Set(policy.candidates("rush/task", "peak", units, when("2026-10-31T14:00:00Z")).candidates.map((c) => c.model))).toEqual(all);
+    expect(ids("2026-10-29T02:00:00Z").has("opencode-go/deepseek-v4.1-flash")).toBe(false);
+    expect(ids("2026-10-29T14:00:00Z").has("ollama-cloud/deepseek-v4.1-flash:1017")).toBe(false);
   });
 
   test("model rating compares only predicted completion time, never configured intelligence or cost", () => {
@@ -94,7 +123,7 @@ describe("recursive keyed-model algebra", () => {
   });
 
   test("disabled peak-priced candidates are excluded before ranking", () => {
-    const id = (t) => policy.candidates("lazy/flash", "peak", units, when(t)).candidates.map((c) => c.model);
+    const id = (t) => policy.candidates("lazy/task", "peak", units, when(t)).candidates.map((c) => c.model);
     const dsPeak = id("2026-10-29T02:00:00Z");
     expect(dsPeak.some((s) => s.startsWith("opencode-go/"))).toBe(false);
     expect(dsPeak.some((s) => s.startsWith("ollama-cloud/"))).toBe(true);
@@ -102,7 +131,7 @@ describe("recursive keyed-model algebra", () => {
     expect(ollamaPeak.some((s) => s.startsWith("ollama-cloud/"))).toBe(false);
     expect(ollamaPeak.some((s) => s.startsWith("cline-pass/"))).toBe(false);
     expect(ollamaPeak.some((s) => s.startsWith("opencode-go/"))).toBe(true);
-    expect(id("2026-10-31T14:00:00Z")).toHaveLength(5);
+    expect(new Set(id("2026-10-31T14:00:00Z"))).toHaveLength(6);
   });
 
   test("unknown aliases and circular trees are rejected", () => {
