@@ -94,12 +94,6 @@
           },
           {
             "type": "model",
-            "model": "google-antigravity/gemini-3.8-flash",
-            "tier": "pro",
-            "effort": "high"
-          },
-          {
-            "type": "model",
             "model": "charm-hyper/deepseek-v4.1-flash-1017",
             "effort": "max"
           },

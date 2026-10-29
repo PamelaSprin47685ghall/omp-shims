@@ -106,7 +106,7 @@ describe("recursive keyed-model algebra", () => {
     expect(ranked("lazy/task", at, { speed }).filter((c) => c.model === model)).toHaveLength(2);
     expect(calls.length).toBeGreaterThan(0);
     expect(calls).toContain(model);
-    expect(new Set(calls)).toContain("google-antigravity/gemini-3.8-flash");
+    expect(new Set(calls)).not.toContain("google-antigravity/gemini-3.8-flash");
   });
 
   test("key distribution is random and can preserve affinity via effective temperature", () => {
@@ -131,13 +131,13 @@ describe("recursive keyed-model algebra", () => {
     expect(raw.filter((c) => c.model === "google-antigravity/gemini-4-argon")).toHaveLength(2);
   });
 
-  test("merged Lazy Task includes the old Flash candidates and preserves peak-price exclusions", () => {
+  test("Lazy Task excludes Gemini 3.8 Flash while preserving all other candidates and peak rules", () => {
     const ids = (at) => new Set(policy.candidates("lazy/task", "peak", units, when(at)).candidates.map((c) => c.model));
     const all = ids("2026-10-31T14:00:00Z");
-    expect(all.size).toBe(6);
+    expect(all.size).toBe(5);
+    expect(all.has("google-antigravity/gemini-3.8-flash")).toBe(false);
     expect(all.has("mistral-vibe/deepseek-v4-1-flash-1017")).toBe(true);
     for (const model of [
-      "google-antigravity/gemini-3.8-flash",
       "charm-hyper/deepseek-v4.1-flash-1017",
       "opencode-go/deepseek-v4.1-flash",
       "ollama-cloud/deepseek-v4.1-flash:1017",
@@ -175,7 +175,7 @@ describe("recursive keyed-model algebra", () => {
     expect(ollamaPeak.some((s) => s.startsWith("ollama-cloud/"))).toBe(false);
     expect(ollamaPeak.some((s) => s.startsWith("cline-pass/"))).toBe(false);
     expect(ollamaPeak.some((s) => s.startsWith("opencode-go/"))).toBe(true);
-    expect(new Set(id("2026-10-31T14:00:00Z"))).toHaveLength(6);
+    expect(new Set(id("2026-10-31T14:00:00Z"))).toHaveLength(5);
   });
 
   test("unknown aliases and circular trees are rejected", () => {
