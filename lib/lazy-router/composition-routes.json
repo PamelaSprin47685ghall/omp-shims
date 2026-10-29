@@ -1,0 +1,127 @@
+{
+  "$comment": "Composable virtual models: a keyed-model leaf, fallback, random and rating. All time windows are UTC; DeepSeek's Chinese holidays are excluded.",
+  "contextWindow": 500000,
+  "maxOutputTokens": 64000,
+  "maxInFlight": {
+    "ollama-cloud": 3,
+    "charm-hyper": 2
+  },
+  "routes": {
+    "lazy/pro": {
+      "displayName": "Lazy Pro",
+      "graph": {
+        "type": "rating",
+        "children": [
+          {
+            "type": "model",
+            "model": "kiro/claude-opus-5-5",
+            "effort": "medium"
+          },
+          {
+            "type": "model",
+            "model": "google-antigravity/claude-opus-5-5",
+            "tier": "ultra",
+            "effort": "medium"
+          },
+          {
+            "type": "model",
+            "model": "google-antigravity/gemini-4-argon",
+            "tier": "ultra",
+            "effort": "medium"
+          }
+        ]
+      }
+    },
+    "lazy/flash": {
+      "displayName": "Lazy Flash",
+      "graph": {
+        "type": "rating",
+        "children": [
+          {
+            "type": "model",
+            "model": "google-antigravity/gemini-3.8-flash",
+            "tier": "pro",
+            "effort": "high"
+          },
+          {
+            "type": "model",
+            "model": "charm-hyper/deepseek-v4.1-flash-1017",
+            "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "effort": "max",
+            "offPeakOnly": "deepseek"
+          },
+          {
+            "type": "model",
+            "model": "ollama-cloud/deepseek-v4.1-flash:1017",
+            "effort": "max",
+            "offPeakOnly": "ollama"
+          },
+          {
+            "type": "model",
+            "model": "cline-pass/deepseek-v4.1-flash-1017",
+            "effort": "max",
+            "offPeakOnly": "ollama"
+          }
+        ]
+      }
+    },
+    "lazy/batch-blind": {
+      "displayName": "Lazy Batch Blind",
+      "graph": {
+        "type": "model",
+        "model": "ctyun/glm-5.3-oc",
+        "effort": "max"
+      }
+    },
+    "lazy/weak": {
+      "displayName": "Lazy Weak",
+      "contextWindow": 250000,
+      "maxOutputTokens": 32768,
+      "graph": {
+        "type": "model",
+        "model": "mistral-vibe/mistral-small-latest",
+        "effort": "high"
+      }
+    },
+    "lazy/default": {
+      "displayName": "Lazy Default",
+      "graph": {
+        "type": "fallback",
+        "children": [
+          {
+            "type": "model",
+            "model": "openai-codex/gpt-6.1-terra",
+            "tier": "plus",
+            "effort": "medium"
+          },
+          {
+            "type": "model",
+            "model": "openai-codex/gpt-6.1-terra",
+            "tier": "pro",
+            "effort": "medium"
+          }
+        ]
+      }
+    },
+    "lazy/task": {
+      "displayName": "Lazy Task",
+      "graph": {
+        "type": "model",
+        "model": "mistral-vibe/deepseek-v4-1-flash-1017",
+        "effort": "max"
+      }
+    },
+    "rush/default": {
+      "displayName": "Rush Default (alias)",
+      "alias": "lazy/default"
+    },
+    "rush/task": {
+      "displayName": "Rush Task (alias)",
+      "alias": "lazy/task"
+    }
+  }
+}

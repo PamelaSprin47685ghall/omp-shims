@@ -1,15 +1,15 @@
-// Virtual-model router: Lazy production routes, Rush dedicated fast lanes and Weak harness experiments share one engine.
+// Virtual-model router: a keyed model or recursive fallback, random and speed-rating compositions.
 //
 // Wiring only; the parts live in lib/lazy-router/:
-//   routes.json / policy.js      declarative route tables → candidate lists
+//   composition-routes.json / composed-policy.js   recursive keyed-model graph
 //   tiers.js / units.js          account tiers at runtime → labelled (provider, account) units
 //   holidays-cn.json / calendar.js   Beijing-time peak detection
 //   catalog.js                   model traits from the gateway's ModelRegistry
 //   effort.js                    effort capping and fitting
 //   formats.js / canonical.js    per-dialect body rewriting and canonical transcripts
-//   affinity.js                  prefix-cache affinity: (length, digest) → unit, 5-minute TTL
+//   affinity.js                  prefix cache influences selection temperature
 //   capacity.js / admission.js   in-flight limits per unit and cache-aware admission
-//   health.js                    per-(unit, model) cooldown + probe loop
+//   cyclic-speed.js               UTC-periodic hourly spline; shared provider/model speed statistics\n//   health.js                    per-(unit, model) cooldown + probe loop
 //   credentials.js / attempt.js  account pinning on the outbound fetch
 //   dispatcher.js                one attempt through the gateway, judged on first headers
 //   router.js                    orchestration, /v1/models entries, status view
@@ -59,6 +59,8 @@ import { formatForPath } from "../lib/lazy-router/formats.js";
 import { HealthRegistry } from "../lib/lazy-router/health.js";
 import { ModelPerf } from "../lib/lazy-router/perf.js";
 import { loadPolicyData, RoutePolicy } from "../lib/lazy-router/policy.js";
+import { ComposedPolicy, loadCompositionData } from "../lib/lazy-router/composed-policy.js";
+import { CyclicSpeed } from "../lib/lazy-router/cyclic-speed.js";
 import { LazyRouter } from "../lib/lazy-router/router.js";
 import { createStatusPage } from "../lib/lazy-router/status-page.js";
 import { TierDirectory } from "../lib/lazy-router/tiers.js";
@@ -84,12 +86,12 @@ async function withLazyModels(response, entries) {
 /** Build the router and its collaborators from the resolved feature config. */
 export function createLazyRouter(config, { log = report } = {}) {
   const ompDir = join(homedir(), ".omp");
-  const policyData = loadPolicyData(config.routesFile ?? undefined);
-  policyData.maxInFlight = { ...(policyData.maxInFlight ?? {}), ...(config.maxInFlight ?? {}) };
-  const policy = new RoutePolicy(policyData);
   const calendar = new HolidayCalendar(loadHolidayData(config.holidaysFile ?? undefined));
-  const schedule = new PeakSchedule({ calendar, windows: policy.peakWindows });
-  const emit = createEventLog({ out: config.out ?? join(ompDir, "logs", "lazy-router.jsonl"), report: log });
+  const policyData = config.routesFile ? loadPolicyData(config.routesFile) : loadCompositionData();
+  policyData.maxInFlight = { ...(policyData.maxInFlight ?? {}), ...(config.maxInFlight ?? {}) };
+  const policy = config.routesFile ? new RoutePolicy(policyData) : new ComposedPolicy(policyData, { calendar });
+  const schedule = new PeakSchedule({ calendar, windows: policy.peakWindows ?? loadPolicyData().peakWindows });
+  const emit = createEventLog({ out: config.out ?? process.env.OMP_SHIMS_LAZY_EVENT_LOG_PATH ?? join(ompDir, "logs", "lazy-router.jsonl"), report: log });
   const tokenPath = config.gatewayTokenPath ?? join(ompDir, "auth-gateway.token");
 
   const credentials = new CredentialStore({
@@ -119,6 +121,9 @@ export function createLazyRouter(config, { log = report } = {}) {
     ...(config.perfHistoryWeightCap ? { historyWeightCap: config.perfHistoryWeightCap } : {}),
   });
 
+  const speed = new CyclicSpeed({
+    statePath: config.speedStatePath ?? process.env.OMP_SHIMS_LAZY_CYCLIC_SPEED_STATE_PATH ?? join(ompDir, "lazy-router-cyclic-speed.json"),
+  });
   const router = new LazyRouter({
     policy,
     units,
@@ -135,6 +140,7 @@ export function createLazyRouter(config, { log = report } = {}) {
     capacity: new InFlightTracker({ limitOf: (unit) => policy.maxInFlight(unit) }),
     admission: new AdmissionControl({ windowMs: config.admissionWindowMs }),
     perf,
+    speed,
     credentials,
     emit,
     settings: {
