@@ -276,6 +276,88 @@ describe("recursive keyed-model algebra", () => {
   });
 });
 
+describe("Rating uses temperature-softmax of log total completion time", () => {
+  const at = when("2026-10-29T12:00:00Z");
+  const two = new ComposedPolicy({ routes: {
+    pair: { graph: { type: "rating", children: [
+      { type: "model", model: "kiro/claude-opus-5-5" },
+      { type: "model", model: "ctyun/deepseek-v4.1-flash" },
+    ] } },
+  } });
+  const candidates = two.candidates("pair", "peak", units, at).candidates;
+  const seededRandom = (seed) => {
+    let state = seed >>> 0;
+    return () => {
+      state = (state + 0x6D2B79F5) >>> 0;
+      let value = Math.imul(state ^ state >>> 15, 1 | state);
+      value ^= value + Math.imul(value ^ value >>> 7, 61 | value);
+      return ((value ^ value >>> 14) >>> 0) / 4294967296;
+    };
+  };
+  const sample = (fastMs, slowMs, temp, rd = 0, draws = 5000) => {
+    const random = seededRandom(3297);
+    const counts = [0, 0];
+    const speed = { predict(model) {
+      return { totalMs: model.startsWith("kiro/") ? fastMs : slowMs, rd, weight: 100 };
+    } };
+    for (let i = 0; i < draws; i++) {
+      const result = two.rankCandidates("pair", candidates, {
+        at, random, speed, settings: { temperature: temp },
+      });
+      counts[result[0].candidate.model.startsWith("kiro/") ? 0 : 1]++;
+    }
+    return counts[0] / draws;
+  };
+
+  test("nearly equal speeds receive nearly equal traffic, not near-deterministic preference", () => {
+    const fastShare = sample(10000, 10300, 0.6);
+    // Theoretical softmax share = 1 / (1 + (10000/10300) ** (1/0.6)).
+    const theoretical = 1 / (1 + Math.pow(10000 / 10300, 1 / 0.6));
+    expect(fastShare).toBeGreaterThan(0.48);
+    expect(fastShare).toBeLessThan(0.56);
+    expect(Math.abs(fastShare - theoretical)).toBeLessThan(0.035);
+  });
+
+  test("large speed gaps favor fast models without starving slow ones unnecessarily", () => {
+    const fastShare = sample(1000, 20000, 0.6);
+    expect(fastShare).toBeGreaterThan(0.98);
+    expect(fastShare).toBeLessThan(1);
+  });
+
+  test("higher temperature flattens the split and zero temperature is fastest-first", () => {
+    const cold = sample(1000, 2000, 0.1);
+    const hot = sample(1000, 2000, 4);
+    expect(cold).toBeGreaterThan(0.99);
+    expect(hot).toBeGreaterThan(0.49);
+    expect(hot).toBeLessThan(0.60);
+    expect(sample(10000, 10300, 0, 1.25, 100)).toBe(1);
+  });
+
+  test("RD still supplies exploration, even for a high-evidence speed rating", () => {
+    const precise = sample(10000, 15000, 0.4, 0, 4000);
+    const uncertain = sample(10000, 15000, 0.4, 3, 4000);
+    // A symmetric posterior draw flattens preference when the model is uncertain.
+    expect(uncertain).toBeLessThan(precise);
+    expect(uncertain).toBeGreaterThan(0.5);
+  });
+
+  test("one unavailable model is removed before drawing and fallback order is unchanged", () => {
+    const onlySlow = two.rankCandidates("pair", candidates, {
+      at, random: seededRandom(10),
+      available: (c) => c.unit.provider === "ctyun",
+      settings: { temperature: 2 },
+    });
+    expect(onlySlow.map(x => x.candidate.unit.provider)).toEqual(["ctyun"]);
+    const fallback = policy.candidates("lazy/default", "peak", units, at).candidates;
+    const winner = policy.rankCandidates("lazy/default", fallback, {
+      at, random: seededRandom(10), settings: { temperature: 100 },
+    });
+    expect(winner.map(x => x.candidate.unit.tier ?? "flex")).toEqual([
+      "plus", "plus", "pro", "flex",
+    ]);
+  });
+});
+
 describe("periodic cubic B-spline sufficient statistics", () => {
   test("basis partition of unity, continuity at midnight, and hourly knot count", () => {
     for (let hour = 0; hour < 24; hour += 1) {
