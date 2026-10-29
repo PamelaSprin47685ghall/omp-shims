@@ -1,12 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { setHostStream } from "../vendor/earendil-works-pi-ai/index.js";
-import { streamOpenAICompletions } from "@mariozechner/pi-ai";
+import { describe, expect, test } from "bun:test";
 import {
   streamMistralVibe,
   withMistralThinkingHistory,
+  withMistralSystemText,
 } from "../lib/mistral-vibe-transport.js";
-
-afterEach(() => setHostStream(null));
 
 const model = { provider: "mistral-vibe", api: "mistral-vibe-native",
   id: "zai-glm-5-3-flash", baseUrl: "https://api.mistral.ai/v1", reasoning: true };
@@ -17,6 +14,26 @@ const assistant = (thinking, text) => ({
     { type: "thinking", thinking, thinkingSignature: "native-signature" },
     { type: "text", text },
   ],
+});
+
+describe("Mistral Gateway system prompt compatibility", () => {
+  test("preserves the ordered text from Gateway content blocks as official Vibe system text", () => {
+    const original = { systemPrompt: [
+      { type: "text", text: "First system rule." },
+      { type: "text", text: "Second system rule." },
+    ], messages: [{ role: "user", content: "Question" }] };
+    const normalized = withMistralSystemText(original);
+    expect(normalized.systemPrompt).toBe("First system rule.\n\nSecond system rule.");
+    expect(original.systemPrompt).toBeArrayOfSize(2);
+    expect(normalized.messages).toBe(original.messages);
+  });
+  test("rejects unknown blocks and leaves normal system strings untouched", () => {
+    const normal = { systemPrompt: "Normal instruction" };
+    expect(withMistralSystemText(normal)).toBe(normal);
+    expect(() => withMistralSystemText({
+      systemPrompt: [{ type: "image", image: "not-a-text-system-instruction" }],
+    })).toThrow("Unsupported Mistral");
+  });
 });
 
 describe("Mistral Vibe pre-serialization thinking replay", () => {
@@ -67,36 +84,21 @@ describe("Mistral Vibe pre-serialization thinking replay", () => {
     expect(empty).toBeUndefined();
   });
 
-  test("delegates standard OpenAI transport, modifying only Mistral onPayload", async () => {
-    const context = { messages: [assistant("Keep this thinking", "OK")] };
-    const modelSeen = [];
-    setHostStream((receivedModel, receivedContext, opts) => {
-      modelSeen.push({ receivedModel, receivedContext });
-      return opts.onPayload({ messages: [{ role: "assistant", content: "OK" }], stream: true },
-        receivedModel);
-    });
-    const corrected = await streamMistralVibe(model, context, {});
-    expect(corrected.messages[0].content[0].type).toBe("thinking");
-    expect(modelSeen[0].receivedModel.api).toBe("openai-completions");
-    expect(model.api).toBe("mistral-vibe-native");
-    expect(modelSeen[0].receivedContext).toBe(context);
-  });
-
-  test("composes user-provided onPayload before the replay without changing unrelated fields", async () => {
+  test("preserves unrelated payload metadata while correcting Mistral thinking", () => {
     const context = { messages: [assistant("Explanation", "OK")] };
-    setHostStream((_model, _context, opts) =>
-      opts.onPayload({ messages: [{ role: "assistant", content: "OK" }] }, model));
-    const fixed = await streamMistralVibe(model, context, {
-      onPayload: (payload) => ({ ...payload, metadata: { source: "custom" } }),
-    });
+    const payload = {
+      messages: [{ role: "assistant", content: "OK" }],
+      metadata: { source: "custom" },
+    };
+    const fixed = withMistralThinkingHistory(payload, context);
     expect(fixed.metadata).toEqual({ source: "custom" });
     expect(fixed.messages[0].content[0].type).toBe("thinking");
+    expect(payload.messages[0].content).toBe("OK");
   });
 
   test("real OMP OpenAI serializer emits Mistral-native thinking before sending HTTP", async () => {
     const originalFetch = globalThis.fetch;
     const captured = [];
-    setHostStream((m, c, o) => streamOpenAICompletions(m, c, o));
     globalThis.fetch = async (target, init) => {
       const request = target instanceof Request ? target : new Request(target, init);
       const body = JSON.parse(await request.clone().text());
@@ -128,9 +130,17 @@ describe("Mistral Vibe pre-serialization thinking replay", () => {
       };
       const stream = streamMistralVibe({
         ...model, input: ["text"], contextWindow: 128000, maxTokens: 4096,
-      }, context, { apiKey: "test-only-key", maxTokens: 8, temperature: 0, maxRetries: 0 });
+      }, context, {
+        apiKey: "test-only-key", maxTokens: 8, temperature: 0, maxRetries: 0,
+        onPayload: (params) => ({ ...params, metadata: { source: "official-parity-test" } }),
+      });
       for await (const _event of stream) {}
       expect(captured).toHaveLength(1);
+      expect(captured[0].metadata).toEqual({ source: "official-parity-test" });
+      expect(captured[0]).not.toHaveProperty("store");
+      expect(captured[0]).toHaveProperty("max_tokens", 8);
+      expect(captured[0]).not.toHaveProperty("max_completion_tokens");
+      expect(captured[0].messages[0].role).toBe("system");
       const msgs = captured[0].messages;
       const historical = msgs.filter((msg) => msg.role === "assistant");
       expect(historical).toHaveLength(1);
