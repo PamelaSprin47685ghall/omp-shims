@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { lazyRouterHandler } from "../features/lazy-router.js";
+import { lazyRouterHandler, RESET_TOKEN_TOTALS_PATH } from "../features/lazy-router.js";
 import { describeStatus } from "../lib/lazy-router/status-page/view.js";
 import { ASSET_PREFIX, CONTENT_SECURITY_POLICY, escapeHtml, renderStatusPage } from "../lib/lazy-router/status-page.js";
 import { TokenTotals, extractTokenAccounting } from "../lib/lazy-router/token-totals.js";
@@ -61,6 +61,10 @@ function inbound() {
 describe("clean-break dashboard", () => {
   test("server renders all counts and measured speed, with coverage and measurement start", () => {
     expect(html).toContain("123,456");
+    expect(html).toContain("路由前缀亲和命中率");
+    expect(html).toContain("重置累积量");
+    expect(html).not.toContain("前缀亲和命中</span>");
+    expect(html).toContain('id="reset-result"');
     expect(html).toContain("987,654");
     expect(html).toContain("111,222");
     expect(html).toContain("65 / 77");
@@ -115,6 +119,12 @@ describe("clean-break dashboard", () => {
     const source = await Bun.file(new URL("../lib/lazy-router/status-page/client.js", import.meta.url)).text();
     expect(source).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(/);
     expect(source).toContain("DOMParser");
+    expect(source).toContain("confirm(");
+    expect(source).toContain("prompt(");
+    expect(source).toContain("authorization:");
+    expect(source).toContain("/v1/lazy/token-totals/reset");
+    expect(source).not.toContain("localStorage");
+    expect(source).not.toContain("sessionStorage");
     expect(CONTENT_SECURITY_POLICY).not.toContain("unsafe");
   });
 });
@@ -149,5 +159,117 @@ describe("durable provider-reported token accounting", () => {
       expect(next.view().since).toMatch(/2026/);
       next.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe("admin-only reset of durable cumulative Token usage", () => {
+  const token = "synthetic-admin-token-never-a-real-credential";
+  const make = () => {
+    const dir = mkdtempSync(join(tmpdir(), "lazy-reset-"));
+    const tokenPath = join(dir, "test-admin-token");
+    writeFileSync(tokenPath, token + "\n", { mode: 0o600 });
+    const file = join(dir, "totals.sqlite");
+    const totals = new TokenTotals({ path: file });
+    totals.db.query("UPDATE metadata SET value=? WHERE name='since'")
+      .run("2020-01-01T00:00:00.000Z");
+    totals.record("p/model", { uncachedInput: 10, cachedInput: 20, output: 5 });
+    totals.record("p/model", { uncachedInput: 30, cachedInput: 40, output: 7 });
+    const router = {
+      status: () => Response.json({ ...STATUS, tokenTotals: totals.view() }),
+      statusView: () => ({ ...STATUS, tokenTotals: totals.view() }),
+      resetTokenTotals: () => totals.reset(),
+      advertisedModels: () => [], handles: () => false,
+    };
+    let forwarded = 0;
+    const fn = lazyRouterHandler(async () => {
+      forwarded++;
+      return Response.json({ error: "not_routed" }, { status: 401 });
+    }, { router, dispatcher: { bind() {} },
+      statusPath: "/v1/lazy/status", gatewayTokenPath: tokenPath });
+    const post = (headers = {}, method = "POST") => fn(new Request(
+      "https://gateway.test" + RESET_TOKEN_TOTALS_PATH,
+      { method, ...(method === "POST" ? { body: "{}" } : {}), headers },
+    ));
+    const goodHeaders = () => ({
+      authorization: "Bearer " + token,
+      "content-type": "application/json",
+      "x-lazy-reset": "token-totals",
+    });
+    return {
+      dir, file, totals, fn, post, goodHeaders,
+      forwarded: () => forwarded,
+      close: () => { totals.close(); rmSync(dir, { recursive: true, force: true }); },
+    };
+  };
+
+  test("public status stays readable, unauthenticated writes and malformed requests never reset", async () => {
+    const h = make();
+    try {
+      const initial = h.totals.view();
+      expect(initial.totals).toEqual({ uncachedInput: 40, cachedInput: 60, output: 12 });
+      expect(initial.coverage.complete).toBe(2);
+      const page = await h.fn(new Request("https://gateway.test/"));
+      expect(page.status).toBe(200);
+      expect((await page.text())).not.toContain(token);
+      expect((await h.post({}, "GET")).status).toBe(405);
+      expect((await h.post()).status).toBe(401);
+      expect((await h.post({ ...h.goodHeaders(), authorization: "Bearer wrong" })).status).toBe(401);
+      expect((await h.post({ ...h.goodHeaders(), "x-lazy-reset": "" })).status).toBe(401);
+      expect((await h.post({ ...h.goodHeaders(), "content-type": "text/plain" })).status).toBe(401);
+      expect((await h.post({ ...h.goodHeaders(), authorization: "" })).status).toBe(401);
+      expect(h.totals.view()).toEqual(initial);
+      expect(h.forwarded()).toBe(0);
+    } finally { h.close(); }
+  });
+
+  test("authorized reset clears totals, coverage and epoch atomically, then records anew", async () => {
+    const h = make();
+    try {
+      const response = await h.post(h.goodHeaders());
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      const answer = await response.json();
+      expect(answer.ok).toBe(true);
+      expect(answer.tokenTotals.totals).toEqual({
+        uncachedInput: 0, cachedInput: 0, output: 0,
+      });
+      expect(answer.tokenTotals.coverage).toEqual({
+        complete: 0, uncachedInput: 0, cachedInput: 0, output: 0,
+      });
+      expect(Date.parse(answer.tokenTotals.since)).toBeGreaterThan(Date.parse("2020-01-01"));
+      expect(h.totals.view().totals.uncachedInput).toBe(0);
+      h.totals.record("p/model", { uncachedInput: 7, output: 3 });
+      const after = h.totals.view();
+      expect(after.totals).toEqual({ uncachedInput: 7, cachedInput: 0, output: 3 });
+      expect(after.coverage).toEqual({
+        complete: 1, uncachedInput: 1, cachedInput: 0, output: 1,
+      });
+      h.totals.close();
+      const reopened = new TokenTotals({ path: h.file });
+      try {
+        expect(reopened.view()).toEqual(after);
+      } finally { reopened.close(); }
+    } finally { h.close(); }
+  });
+
+  test("failed storage reset returns 503 and does not invent success", async () => {
+    const h = make();
+    try {
+      h.totals.close();
+      const response = await h.post(h.goodHeaders());
+      expect(response.status).toBe(503);
+      expect((await response.json()).error).toBe("counter_unavailable");
+      expect(h.forwarded()).toBe(0);
+    } finally { h.close(); }
+  });
+
+  test("reset is not an affinity, speed or health control", async () => {
+    const h = make();
+    try {
+      const before = h.routerState ?? STATUS.affinity;
+      expect((await h.post(h.goodHeaders())).status).toBe(200);
+      expect(STATUS.affinity).toEqual(before);
+      expect(STATUS.perf["mistral-vibe/deepseek-v4-1-flash-1017"].samples).toBe(12);
+    } finally { h.close(); }
   });
 });

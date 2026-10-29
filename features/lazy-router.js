@@ -40,6 +40,8 @@
 //     }
 //   }
 
+import { timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { report } from "../lib/bootstrap.js";
@@ -69,6 +71,22 @@ import { TierDirectory } from "../lib/lazy-router/tiers.js";
 import { UnitDirectory } from "../lib/lazy-router/units.js";
 
 const MODELS_PATH = "/v1/models";
+/** Public reads remain unauthenticated; this destructive operation never does. */
+export const RESET_TOKEN_TOTALS_PATH = "/v1/lazy/token-totals/reset";
+
+function authorizedTokenReset(request, tokenPath) {
+  // A simple cross-origin form cannot provide our custom header or bearer key.
+  if (request.headers.get("x-lazy-reset") !== "token-totals") return false;
+  if (!/^application\/json(?:\s*;.*)?$/i.test(request.headers.get("content-type") ?? "")) return false;
+  const provided = /^Bearer\s+([^\s]+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
+  if (!provided) return false;
+  let trusted;
+  try { trusted = readFileSync(tokenPath, "utf8").trim(); } catch { return false; }
+  if (!trusted) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(trusted);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 const DEFAULT_BROKER_URL = "http://127.0.0.1:8765";
 
 /** Append the lazy entries to a /v1/models answer. */
@@ -194,12 +212,32 @@ export function lazyRouterHandler(
     router,
     dispatcher,
     statusPath,
+    gatewayTokenPath = join(homedir(), ".omp", "auth-gateway.token"),
     statusPage = createStatusPage({ statusPath, statusView: () => router.statusView() }),
   },
 ) {
   return async function lazyRouterInbound(request, server) {
     dispatcher.bind(handler, server);
     const { pathname } = new URL(request.url);
+
+    if (pathname === RESET_TOKEN_TOTALS_PATH) {
+      if (request.method !== "POST") {
+        return Response.json({ error: "method_not_allowed" }, {
+          status: 405, headers: { allow: "POST", "cache-control": "no-store" },
+        });
+      }
+      if (!authorizedTokenReset(request, gatewayTokenPath)) {
+        return Response.json({ error: "unauthorized" }, {
+          status: 401, headers: { "cache-control": "no-store" },
+        });
+      }
+      const ok = router.resetTokenTotals();
+      return Response.json(ok
+        ? { ok: true, tokenTotals: router.statusView().tokenTotals }
+        : { error: "counter_unavailable" }, {
+        status: ok ? 200 : 503, headers: { "cache-control": "no-store" },
+      });
+    }
 
     const page = statusPage(request.method, pathname);
     if (page) return page;
@@ -272,6 +310,9 @@ export function install(config, context) {
   }
   context.addFetchHandler(attemptLayer);
   tiers.start();
-  wrapServe((handler) => lazyRouterHandler(handler, { router, dispatcher, statusPath: config.statusPath }));
+  wrapServe((handler) => lazyRouterHandler(handler, {
+    router, dispatcher, statusPath: config.statusPath,
+    gatewayTokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+  }));
   context.log?.("lazy-router: enabled", { routes: router.policy.routeNames });
 }
