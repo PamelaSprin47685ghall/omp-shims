@@ -54,25 +54,40 @@ describe("recursive keyed-model algebra", () => {
     expect(codex({ available: (c) => c.unit.tier !== "plus" }).map((c) => c.unit.key)).toEqual(["pro1"]);
   });
 
-  test("OpenAI API Flex Terra medium competes with Codex, without destroying Plus/Pro fallback", () => {
+  test("Plus, then Pro, then official OpenAI API Flex Terra medium strictly", () => {
     const at = when("2026-10-29T12:00:00Z");
     const topology = policy.routeTopology()["lazy/default"].graph;
-    expect(topology.type).toBe("rating");
-    expect(topology.children[0].type).toBe("fallback");
-    expect(topology.children[0].children.map((c) => c.tier)).toEqual(["plus", "pro"]);
-    expect(topology.children[1]).toMatchObject({
-      type: "model", model: "openai-api/gpt-6.1-terra", effort: "medium",
-    });
-    const ids = policy.candidates("lazy/default", "peak", units, at).candidates.map((c) => c.model);
-    expect(ids).toContain("openai-api/gpt-6.1-terra");
-    const chosen = (winner) => ranked("lazy/default", at, {
-      random: () => 0.5,
+    expect(topology.type).toBe("fallback");
+    expect(topology.children.map((c) => [c.model, c.tier, c.effort])).toEqual([
+      ["openai-codex/gpt-6.1-terra", "plus", "medium"],
+      ["openai-codex/gpt-6.1-terra", "pro", "medium"],
+      ["openai-api/gpt-6.1-terra", null, "medium"],
+    ]);
+    const choice = (options = {}) => ranked("lazy/default", at, options);
+    const ordered = choice().map((c) => [c.model, c.unit.tier ?? null]);
+    expect(ordered.slice(0, 2)).toEqual([
+      ["openai-codex/gpt-6.1-terra", "plus"],
+      ["openai-codex/gpt-6.1-terra", "plus"],
+    ]);
+    expect(ordered.slice(2)).toEqual([
+      ["openai-codex/gpt-6.1-terra", "pro"],
+      ["openai-api/gpt-6.1-terra", null],
+    ]);
+    const fastestFlex = choice({
       speed: { predict(model) {
-        return { totalMs: model === winner ? 10 : 100000, rd: 0.1, weight: 100 };
+        return { totalMs: model === "openai-api/gpt-6.1-terra" ? 1 : 100000,
+          rd: 0.1, weight: 100 };
       } },
     });
-    expect(chosen("openai-api/gpt-6.1-terra")[0].model).toBe("openai-api/gpt-6.1-terra");
-    expect(chosen("openai-codex/gpt-6.1-terra")[0].model).toBe("openai-codex/gpt-6.1-terra");
+    expect(fastestFlex.at(-1).model).toBe("openai-api/gpt-6.1-terra");
+    expect(fastestFlex[0].unit.tier).toBe("plus");
+    const noPlus = choice({ available: (c) => c.unit.tier !== "plus" });
+    expect(noPlus[0].unit.tier).toBe("pro");
+    expect(noPlus.at(-1).model).toBe("openai-api/gpt-6.1-terra");
+    const onlyFlex = choice({
+      available: (c) => c.model === "openai-api/gpt-6.1-terra",
+    });
+    expect(onlyFlex.map((c) => c.model)).toEqual(["openai-api/gpt-6.1-terra"]);
   });
 
   test("Mistral GLM Flash has 20 concurrent slots for each Key, not 20 shared across Keys", () => {
@@ -249,8 +264,8 @@ describe("recursive keyed-model algebra", () => {
     expect(Object.keys(topology)).toEqual(policy.routeNames);
     expect(topology["lazy/pro"].graph.type).toBe("rating");
     expect(topology["lazy/pro"].graph.children[2].type).toBe("fallback");
-    expect(topology["lazy/default"].graph.type).toBe("rating");
-    expect(topology["lazy/default"].graph.children[0].type).toBe("fallback");
+    expect(topology["lazy/default"].graph.type).toBe("fallback");
+    expect(topology["lazy/default"].graph.children).toHaveLength(3);
     expect(topology["lazy/task"].graph.type).toBe("rating");
     expect(JSON.stringify(topology)).not.toContain("credentialId");
   });
