@@ -21,6 +21,7 @@ const accounts = [
   { provider: "ollama-cloud", key: "ollama", label: "ollama" },
   { provider: "cline-pass", key: "cline", label: "cline" },
   { provider: "ctyun", key: "ctyun", label: "ctyun" },
+  { provider: "openai-api", key: "api1", label: "openai-api" },
 ];
 const units = { select(provider, tiers) { return accounts.filter((a) => a.provider === provider && (!tiers || tiers.includes(a.tier))); } };
 const policy = new ComposedPolicy();
@@ -44,12 +45,34 @@ describe("recursive keyed-model algebra", () => {
     for (const name of ["weak/task", "rush/default", "rush/task", "rush/vision", "lazy/vision", "weak/default", "lazy/flash"]) expect(policy.routeFor(name)).toBeUndefined();
   });
 
-  test("all Plus keys precede all Pro keys, even when Pro has better predicted speed", () => {
+  test("Codex Plus remains ahead of Codex Pro inside its fallback branch", () => {
     const at = when("2026-10-29T12:00:00Z");
-    const expected = ["plus", "plus", "pro"];
-    expect(ranked("lazy/default", at).map((c) => c.unit.tier)).toEqual(expected);
-    expect(ranked("lazy/default", at, { available: (c) => c.unit.key !== "plus1" }).map((c) => c.unit.key)).toEqual(["plus2", "pro1"]);
-    expect(ranked("lazy/default", at, { available: (c) => c.unit.tier !== "plus" }).map((c) => c.unit.key)).toEqual(["pro1"]);
+    const codex = (options) => ranked("lazy/default", at, options)
+      .filter((c) => c.model === "openai-codex/gpt-6.1-terra");
+    expect(codex().map((c) => c.unit.tier)).toEqual(["plus", "plus", "pro"]);
+    expect(codex({ available: (c) => c.unit.key !== "plus1" }).map((c) => c.unit.key)).toEqual(["plus2", "pro1"]);
+    expect(codex({ available: (c) => c.unit.tier !== "plus" }).map((c) => c.unit.key)).toEqual(["pro1"]);
+  });
+
+  test("OpenAI API Flex Terra medium competes with Codex, without destroying Plus/Pro fallback", () => {
+    const at = when("2026-10-29T12:00:00Z");
+    const topology = policy.routeTopology()["lazy/default"].graph;
+    expect(topology.type).toBe("rating");
+    expect(topology.children[0].type).toBe("fallback");
+    expect(topology.children[0].children.map((c) => c.tier)).toEqual(["plus", "pro"]);
+    expect(topology.children[1]).toMatchObject({
+      type: "model", model: "openai-api/gpt-6.1-terra", effort: "medium",
+    });
+    const ids = policy.candidates("lazy/default", "peak", units, at).candidates.map((c) => c.model);
+    expect(ids).toContain("openai-api/gpt-6.1-terra");
+    const chosen = (winner) => ranked("lazy/default", at, {
+      random: () => 0.5,
+      speed: { predict(model) {
+        return { totalMs: model === winner ? 10 : 100000, rd: 0.1, weight: 100 };
+      } },
+    });
+    expect(chosen("openai-api/gpt-6.1-terra")[0].model).toBe("openai-api/gpt-6.1-terra");
+    expect(chosen("openai-codex/gpt-6.1-terra")[0].model).toBe("openai-codex/gpt-6.1-terra");
   });
 
   test("Mistral GLM Flash has 20 concurrent slots for each Key, not 20 shared across Keys", () => {
@@ -226,7 +249,8 @@ describe("recursive keyed-model algebra", () => {
     expect(Object.keys(topology)).toEqual(policy.routeNames);
     expect(topology["lazy/pro"].graph.type).toBe("rating");
     expect(topology["lazy/pro"].graph.children[2].type).toBe("fallback");
-    expect(topology["lazy/default"].graph.type).toBe("fallback");
+    expect(topology["lazy/default"].graph.type).toBe("rating");
+    expect(topology["lazy/default"].graph.children[0].type).toBe("fallback");
     expect(topology["lazy/task"].graph.type).toBe("rating");
     expect(JSON.stringify(topology)).not.toContain("credentialId");
   });

@@ -20,6 +20,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { activePin } from "../lib/credential-pin.js";
+import { installOpenAiApiFlex } from "../lib/openai-api-flex.js";
 import { stableIdentityOAuth } from "../lib/oauth-identity.js";
 import {
   installMistralVibeResponseAdapter,
@@ -313,6 +314,7 @@ function wrapTransportEvents(transport, provider) {
 export async function install(config, context) {
   const log = context.log ?? (() => {});
   installMistralVibeResponseAdapter(context);
+  installOpenAiApiFlex(context);
   const pluginsDir = config.pluginsDir ?? join(homedir(), ".omp", "plugins");
   // Token specs are provider-agnostic and live outside `features`, so they are
   // merged in from the top-level `pluginBridge` section by the bootstrap.

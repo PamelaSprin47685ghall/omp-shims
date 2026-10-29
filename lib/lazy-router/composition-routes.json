@@ -56,20 +56,30 @@
       }
     },
     "lazy/default": {
-      "displayName": "Lazy Default",
+      "displayName": "Lazy Default · Terra Medium (Codex + OpenAI API Flex)",
       "graph": {
-        "type": "fallback",
+        "type": "rating",
         "children": [
           {
-            "type": "model",
-            "model": "openai-codex/gpt-6.1-terra",
-            "tier": "plus",
-            "effort": "medium"
+            "type": "fallback",
+            "children": [
+              {
+                "type": "model",
+                "model": "openai-codex/gpt-6.1-terra",
+                "tier": "plus",
+                "effort": "medium"
+              },
+              {
+                "type": "model",
+                "model": "openai-codex/gpt-6.1-terra",
+                "tier": "pro",
+                "effort": "medium"
+              }
+            ]
           },
           {
             "type": "model",
-            "model": "openai-codex/gpt-6.1-terra",
-            "tier": "pro",
+            "model": "openai-api/gpt-6.1-terra",
             "effort": "medium"
           }
         ]
