@@ -51,8 +51,8 @@ describe("recursive keyed-model algebra", () => {
     expect(ranked("lazy/default", at, { available: (c) => c.unit.tier !== "plus" }).map((c) => c.unit.key)).toEqual(["pro1"]);
   });
 
-  test("Mistral DeepSeek has 20 concurrent slots for each Key, not 20 shared across Keys", () => {
-    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+  test("Mistral GLM Flash has 20 concurrent slots for each Key, not 20 shared across Keys", () => {
+    const model = "mistral-vibe/zai-glm-5-3-flash";
     const key1 = { provider: "mistral-vibe", key: "mistral-vibe/31", label: "mistral-vibe#1" };
     const key2 = { provider: "mistral-vibe", key: "mistral-vibe/42", label: "mistral-vibe#2" };
     const first = policy.capacityUnit({ unit: key1, model });
@@ -87,7 +87,7 @@ describe("recursive keyed-model algebra", () => {
 
   test("multiple Mistral keys receive one shared speed prediction", () => {
     const at = when("2026-10-29T12:00:00Z");
-    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const model = "mistral-vibe/zai-glm-5-3-flash";
     const calls = [];
     const speed = { predict(name) { calls.push(name); return { totalMs: 2300, rd: 0.2, weight: 90 }; } };
     const result = ranked("lazy/task", at, { speed });
@@ -120,20 +120,15 @@ describe("recursive keyed-model algebra", () => {
     expect(raw.filter((c) => c.model === "google-antigravity/gemini-4-argon")).toHaveLength(2);
   });
 
-  test("Lazy Task excludes Gemini 3.8 Flash while preserving all other candidates and peak rules", () => {
-    const ids = (at) => new Set(policy.candidates("lazy/task", "peak", units, when(at)).candidates.map((c) => c.model));
-    const all = ids("2026-10-31T14:00:00Z");
-    expect(all.size).toBe(5);
-    expect(all.has("google-antigravity/gemini-3.8-flash")).toBe(false);
-    expect(all.has("mistral-vibe/deepseek-v4-1-flash-1017")).toBe(true);
-    for (const model of [
-      "charm-hyper/deepseek-v4.1-flash-1017",
-      "opencode-go/deepseek-v4.1-flash",
-      "ollama-cloud/deepseek-v4.1-flash:1017",
-      "cline-pass/deepseek-v4.1-flash-1017",
-    ]) expect(all.has(model)).toBe(true);
-    expect(ids("2026-10-29T02:00:00Z").has("opencode-go/deepseek-v4.1-flash")).toBe(false);
-    expect(ids("2026-10-29T14:00:00Z").has("ollama-cloud/deepseek-v4.1-flash:1017")).toBe(false);
+  test("Lazy Task routes only to Mistral GLM Flash at every time and on every key", () => {
+    const ids = (at) => policy.candidates("lazy/task", "peak", units, when(at)).candidates.map((c) => c.model);
+    const glm = "mistral-vibe/zai-glm-5-3-flash";
+    for (const at of ["2026-10-31T14:00:00Z", "2026-10-29T02:00:00Z", "2026-10-29T14:00:00Z"]) {
+      expect(ids(at)).toEqual([glm, glm]);
+    }
+    expect(policy.routeTopology()["lazy/task"].graph).toEqual({
+      type: "model", model: glm, tier: null, effort: "high", offPeakOnly: null,
+    });
   });
 
   test("model rating compares only predicted completion time, never configured intelligence or cost", () => {
@@ -154,16 +149,21 @@ describe("recursive keyed-model algebra", () => {
     expect(isOllamaPeak(when("2026-10-31T12:00:00Z"))).toBe(false);
   });
 
-  test("disabled peak-priced candidates are excluded before ranking", () => {
-    const id = (t) => policy.candidates("lazy/task", "peak", units, when(t)).candidates.map((c) => c.model);
-    const dsPeak = id("2026-10-29T02:00:00Z");
-    expect(dsPeak.some((s) => s.startsWith("opencode-go/"))).toBe(false);
-    expect(dsPeak.some((s) => s.startsWith("ollama-cloud/"))).toBe(true);
-    const ollamaPeak = id("2026-10-29T14:00:00Z");
-    expect(ollamaPeak.some((s) => s.startsWith("ollama-cloud/"))).toBe(false);
-    expect(ollamaPeak.some((s) => s.startsWith("cline-pass/"))).toBe(false);
-    expect(ollamaPeak.some((s) => s.startsWith("opencode-go/"))).toBe(true);
-    expect(new Set(id("2026-10-31T14:00:00Z"))).toHaveLength(5);
+  test("GLM warm conversation always stays on its cached account across RNG values", () => {
+    const at = when("2026-10-29T12:00:00Z");
+    for (const randomValue of [0, 0.2, 0.5, 0.8, 0.999]) {
+      const warm = ranked("lazy/task", at, {
+        random: () => randomValue,
+        cachedShare: (c) => c.unit.key === "m2" ? 0.5 : 0,
+        cachedBytes: (c) => c.unit.key === "m2" ? 30000 : 0,
+      });
+      expect(warm.map((c) => c.unit.key)).toEqual(["m2", "m1"]);
+    }
+    // When the warm account fails, the other account remains available.
+    expect(ranked("lazy/task", at, {
+      available: (c) => c.unit.key !== "m2",
+      cachedBytes: (c) => c.unit.key === "m2" ? 30000 : 0,
+    }).map((c) => c.unit.key)).toEqual(["m1"]);
   });
 
   test("topology exposes nested rating, fallback and model leaves", () => {
@@ -172,7 +172,7 @@ describe("recursive keyed-model algebra", () => {
     expect(topology["lazy/pro"].graph.type).toBe("rating");
     expect(topology["lazy/pro"].graph.children[2].type).toBe("fallback");
     expect(topology["lazy/default"].graph.type).toBe("fallback");
-    expect(topology["lazy/task"].graph.children).toHaveLength(5);
+    expect(topology["lazy/task"].graph.type).toBe("model");
     expect(JSON.stringify(topology)).not.toContain("credentialId");
   });
 

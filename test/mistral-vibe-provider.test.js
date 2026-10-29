@@ -3,8 +3,6 @@ import { describe, expect, test } from "bun:test";
 import {
   fetchMistralVibeModels,
   installMistralVibeResponseAdapter,
-  addMistralPromptCacheKey,
-  mistralPromptCacheKey,
   loginMistralVibe,
   MISTRAL_VIBE_API_BASE,
   MISTRAL_VIBE_AUTH_API_BASE,
@@ -17,98 +15,55 @@ import {
 const reply = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-describe("Mistral Vibe native prefix-cache compatibility", () => {
-  const first = {
-    model: "deepseek-v4-1-flash-1017",
-    messages: [
-      { role: "system", content: "An unchanged shared system instruction." },
-      { role: "user", content: "The first turn in this conversation." },
-    ],
-    stream: false,
-  };
-
-  test("stable across appended turns, opaque, scoped by model and initial turn", () => {
-    const firstKey = mistralPromptCacheKey(first);
-    const nextKey = mistralPromptCacheKey({
-      ...first,
-      messages: [...first.messages, { role: "assistant", content: "Answer" },
-        { role: "user", content: "A follow-up question" }],
-    });
-    expect(firstKey).toBe(nextKey);
-    expect(firstKey).toStartWith("omp-");
-    expect(firstKey).not.toContain("first");
-    expect(mistralPromptCacheKey({ ...first, model: "another-model" })).not.toBe(firstKey);
-    expect(mistralPromptCacheKey({ ...first, messages: [
-      first.messages[0], { role: "user", content: "Another initial turn" },
-    ] })).not.toBe(firstKey);
-    expect(mistralPromptCacheKey({ messages: [] })).toBeUndefined();
-  });
-
-  test("caller-provided key, even null, is retained and malformed input passes through", () => {
-    for (const value of ["application-key", null]) {
-      const text = JSON.stringify({ ...first, prompt_cache_key: value });
-      expect(addMistralPromptCacheKey(text)).toBeUndefined();
-    }
-    expect(addMistralPromptCacheKey("not json")).toBeUndefined();
-    expect(addMistralPromptCacheKey(JSON.stringify({ model: first.model }))).toBeUndefined();
-  });
-
-  test("rewrites only Mistral JSON chat request; preserves cached usage and body", async () => {
+describe("Mistral Vibe official request parity", () => {
+  test("does not invent a prompt_cache_key for the official Mistral SDK", async () => {
     const handlers = [];
     installMistralVibeResponseAdapter({
       addFetchHandler: (handler) => handlers.push(handler),
       preserveResponseUrl: (response) => response,
     });
-    const seen = [];
-    const next = async (target, init) => {
-      seen.push({ url: String(target), init, body: JSON.parse(init.body) });
-      return reply({
-        usage: { prompt_tokens: 512, prompt_tokens_details: { cached_tokens: 448 } },
-        choices: [{ message: { role: "assistant", content: "OK" } }],
-      });
+    const body = {
+      model: "zai-glm-5-3-flash",
+      messages: [{ role: "system", content: "Unchanged synthetic prompt" },
+                 { role: "user", content: "Reply OK" }],
+      stream: false,
     };
-    const url = "https://api.mistral.ai/v1/chat/completions";
-    const init = { method: "POST", headers: {
-      "content-type": "application/json", "content-length": "10",
-    }, body: JSON.stringify(first) };
-    const response = await handlers[0](url, init, next);
-    expect(seen).toHaveLength(1);
-    expect(seen[0].body.messages).toEqual(first.messages);
-    expect(seen[0].body.prompt_cache_key).toBe(mistralPromptCacheKey(first));
-    expect(new Headers(seen[0].init.headers).has("content-length")).toBe(false);
-    expect((await response.json()).usage.prompt_tokens_details.cached_tokens).toBe(448);
-    await handlers[0](url, { ...init, body: JSON.stringify({ ...first, messages: [
-      ...first.messages, { role: "user", content: "Next turn" },
-    ] }) }, next);
-    expect(seen[1].body.prompt_cache_key).toBe(seen[0].body.prompt_cache_key);
-    const untrusted = await handlers[0]("https://example.net/v1/chat/completions", init, next);
-    expect(seen[2].body.prompt_cache_key).toBeUndefined();
-    expect((await untrusted.json()).choices).toHaveLength(1);
+    let seen;
+    const response = await handlers[0]("https://api.mistral.ai/v1/chat/completions",
+      { method: "POST", body: JSON.stringify(body) },
+      async (_input, init) => {
+        seen = JSON.parse(init.body);
+        return reply({ usage: { prompt_tokens_details: { cached_tokens: 9216 } },
+                       choices: [{ message: { role: "assistant", content: "OK" } }] });
+      });
+    expect(seen).toEqual(body);
+    expect(seen).not.toHaveProperty("prompt_cache_key");
+    expect((await response.json()).usage.prompt_tokens_details.cached_tokens).toBe(9216);
   });
 
-  test("supports Request objects without losing method or sending twice on network errors", async () => {
+  test("preserves explicit client cache keys and Request bodies byte for byte", async () => {
     const handlers = [];
     installMistralVibeResponseAdapter({
       addFetchHandler: (handler) => handlers.push(handler),
       preserveResponseUrl: (response) => response,
     });
-    const url = "https://api.mistral.ai/v1/chat/completions";
-    const original = new Request(url, {
-      method: "POST",
-      body: JSON.stringify(first),
+    const payload = JSON.stringify({
+      model: "zai-glm-5-3-flash", messages: [{ role: "user", content: "Hello" }],
+      prompt_cache_key: "client-controlled",
+    });
+    const incoming = new Request("https://api.mistral.ai/v1/chat/completions", {
+      method: "POST", body: payload,
       headers: { "content-type": "application/json" },
     });
-    let calls = 0;
-    const upstream = async (input, init) => {
-      calls += 1;
-      expect(input).toBeInstanceOf(Request);
-      expect(input.method).toBe("POST");
-      expect((await input.clone().json()).prompt_cache_key).toBe(mistralPromptCacheKey(first));
+    let called = 0;
+    await handlers[0](incoming, undefined, async (input, init) => {
+      called++;
+      expect(input).toBe(incoming);
       expect(init).toBeUndefined();
-      throw new Error("upstream failed");
-    };
-    await expect(handlers[0](original, undefined, upstream)).rejects.toThrow("upstream failed");
-    expect(calls).toBe(1);
+      expect(await input.clone().text()).toBe(payload);
+      return reply({ choices: [{ message: { content: "OK" } }] });
+    });
+    expect(called).toBe(1);
   });
 });
 
