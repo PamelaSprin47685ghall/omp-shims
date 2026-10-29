@@ -132,6 +132,29 @@ describe("periodic cubic B-spline sufficient statistics", () => {
     expect(speed.predict("a/model").weight).toBeCloseTo(25, 6);
   });
 
+  test("hourly RD remains uncertain away from the observed UTC hour", () => {
+    let now = Date.UTC(2026, 9, 29, 6);
+    const speed = new CyclicSpeed({ now: () => now });
+    for (let i = 0; i < 200; i++) speed.observe("a/model", 950);
+    const seenHour = speed.predict("a/model", now);
+    const unseenHour = speed.predict("a/model", now + 8 * 3_600_000);
+    expect(seenHour.localWeight).toBeGreaterThan(0);
+    expect(unseenHour.localWeight).toBeCloseTo(0, 6);
+    expect(unseenHour.rd).toBeGreaterThan(seenHour.rd);
+  });
+
+  test("old speed observations lose influence on the fitted mean as they age", () => {
+    let now = Date.UTC(2026, 9, 29, 6);
+    const speed = new CyclicSpeed({ now: () => now });
+    for (let i = 0; i < 200; i++) speed.observe("a/model", 900);
+    const fresh = speed.predict("a/model").totalMs;
+    now += 4 * 86_400_000;
+    const stale = speed.predict("a/model").totalMs;
+    expect(fresh).toBeLessThan(8000);
+    expect(stale).toBeGreaterThan(fresh);
+    expect(speed.predict("a/model").weight).toBeCloseTo(12.5, 6);
+  });
+
   test("censored slow requests raise expected time without being counted as successes", () => {
     let now = Date.UTC(2026, 9, 29, 6);
     const speed = new CyclicSpeed({ now: () => now });
