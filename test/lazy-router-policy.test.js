@@ -90,18 +90,29 @@ describe("bundled route tables", () => {
     ]);
   });
 
-  test("rush/task and rush/vision are strict Mistral -> Cline -> Ollama GLM Flash lanes", () => {
-    const expected = [
-      "mistral-vibe mistral-vibe/zai-glm-5-3-flash",
+  test("rush/task uses Mistral DeepSeek first; rush/vision keeps its GLM Flash lane", () => {
+    const backup = [
       "cline-pass#1 cline-pass/glm-5.3-flash",
       "cline-pass#2 cline-pass/glm-5.3-flash",
       "ollama-cloud ollama-cloud/glm-5.3-flash",
     ];
     expect(policy.selectionOf("rush/task")).toBe("ordered");
-    expect(order("rush/task", PERIOD.PEAK)).toEqual(expected);
+    expect(order("rush/task", PERIOD.PEAK)).toEqual([
+      "mistral-vibe mistral-vibe/deepseek-v4-1-flash-1017",
+      ...backup,
+    ]);
+    expect(order("rush/task", PERIOD.OFF_PEAK)).toEqual(order("rush/task", PERIOD.PEAK));
+    const task = policy.candidates("rush/task", PERIOD.PEAK, units, TEST_NOW);
+    expect(task.candidates[0]).toMatchObject({
+      effort: "max",
+      intelligence: 59,
+      cost: 0.04,
+    });
+    const expectedVision = ["mistral-vibe mistral-vibe/zai-glm-5-3-flash", ...backup];
     const vision = policy.candidates("rush/vision", PERIOD.PEAK, units, TEST_NOW);
     expect(vision.require).toEqual(["text", "image"]);
-    expect(vision.candidates.map((c) => c.unit.label + " " + c.model)).toEqual(expected);
+    expect(vision.candidates.map((c) => c.unit.label + " " + c.model)).toEqual(expectedVision);
+    expect(order("rush/vision", PERIOD.OFF_PEAK)).toEqual(expectedVision);
     expect(vision.candidates.every((c) => c.effort === "max")).toBe(true);
   });
 

@@ -178,9 +178,9 @@
       "periods": {
         "peak": [
           {
-            "model": "mistral-vibe/zai-glm-5-3-flash",
+            "model": "mistral-vibe/deepseek-v4-1-flash-1017",
             "effort": "max",
-            "intelligence": 49.5,
+            "intelligence": 59,
             "cost": 0.04
           },
           {
@@ -210,9 +210,37 @@
         "text",
         "image"
       ],
-      "derive": {
-        "from": "rush/task"
-      }
+      "periods": {
+        "peak": [
+          {
+            "model": "mistral-vibe/zai-glm-5-3-flash",
+            "effort": "max",
+            "intelligence": 49.5,
+            "cost": 0.04
+          },
+          {
+            "model": "cline-pass/glm-5.3-flash",
+            "effort": "max",
+            "intelligence": 49.5,
+            "cost": 0.25
+          },
+          {
+            "model": "ollama-cloud/glm-5.3-flash",
+            "effort": "max",
+            "intelligence": 49.5,
+            "cost": 0.278
+          }
+        ],
+        "offPeak": [
+          {
+            "sameAs": "peak"
+          }
+        ]
+      },
+      "require": [
+        "text",
+        "image"
+      ]
     },
     "weak/default": {
       "displayName": "Weak · coordinator",
