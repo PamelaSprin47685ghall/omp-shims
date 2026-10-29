@@ -60,7 +60,7 @@ function inbound() {
 }
 describe("clean-break dashboard", () => {
   test("server renders all counts and measured speed, with coverage and measurement start", () => {
-    expect(html).toContain("123,456");
+    expect(html).toContain("0.1 M");
     const priced = renderStatusPage({ ...STATUS, tokenTotals: {
       ...STATUS.tokenTotals,
       officialValue: {
@@ -75,6 +75,8 @@ describe("clean-break dashboard", () => {
     } },{statusPath:"/v1/lazy/status"});
     expect(priced).toContain("累计官方 API 价格等效价值");
     expect(priced).toContain("USD $21.2537");
+    expect(priced).toContain("CNY ¥141.59");
+    expect(priced).toContain("1 USD = 6.6620 CNY");
     expect(priced).toContain("官方定价覆盖 2 / 3");
     expect(priced).toContain("各模型等效价值明细");
     expect(priced).toContain("无可靠官方价格");
@@ -84,14 +86,30 @@ describe("clean-break dashboard", () => {
     expect(html).toContain("重置累积量");
     expect(html).not.toContain("前缀亲和命中</span>");
     expect(html).toContain('id="reset-result"');
-    expect(html).toContain("987,654");
-    expect(html).toContain("111,222");
+    expect(html).toContain("1.0 M");
+    expect(html).toContain("0.1 M");
     expect(html).toContain("65 / 77");
     expect(html).toContain("2026-10-29 05:50 UTC");
     expect(html).toContain("3.5 s");
     expect(html).toContain("0.45");
     expect(html).toContain("4/20");
     expect(html).toContain("无错并发实证");
+  });
+  test("displays million-token totals with one decimal and derives CNY only from USD", () => {
+    const page = renderStatusPage({ ...STATUS, tokenTotals: {
+      ...STATUS.tokenTotals,
+      totals: { uncachedInput: 1_490_000, cachedInput: 1_560_000, output: 0 },
+      officialValue: { currency: "USD", valueUsd: 1.25, pricedModels: 1,
+        totalModels: 1, unpricedModels: 0, ratesAsOf: "2026-10-29",
+        note: "参考价格", models: [{model:"one/test",priced:true,valueUsd:1.25,
+          source:null,basis:"test",perMillion:{uncachedInput:1,cachedInput:0,output:1}}] },
+    } }, { statusPath: "/v1/lazy/status" });
+    expect(page).toContain("1.5 M");
+    expect(page).toContain("1.6 M");
+    expect(page).toContain("0.0 M");
+    expect(page).toContain("USD $1.2500");
+    expect(page).toContain("CNY ¥8.33");
+    expect(page).not.toContain(">1,490,000</strong>");
   });
   test("only current Lazy routes and compositional ordering semantics are presented", () => {
     expect(html).toContain("严格有序的后备链");
