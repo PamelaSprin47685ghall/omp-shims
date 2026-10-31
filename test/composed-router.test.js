@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ComposedPolicy, isDeepSeekPeak, isOllamaPeak } from "../lib/lazy-router/composed-policy.js";
+import { ComposedPolicy, isDeepSeekPeak, isOllamaPeak, isCommandCodePeak } from "../lib/lazy-router/composed-policy.js";
 import { CyclicSpeed, periodicBasis } from "../lib/lazy-router/cyclic-speed.js";
 import { InFlightTracker } from "../lib/lazy-router/capacity.js";
 
@@ -21,6 +21,7 @@ const accounts = [
   { provider: "ollama-cloud", key: "ollama", label: "ollama" },
   { provider: "cline-pass", key: "cline", label: "cline" },
   { provider: "ctyun", key: "ctyun", label: "ctyun" },
+  { provider: "commandcode", key: "command", label: "command" },
   { provider: "openai-api", key: "api1", label: "openai-api" },
 ];
 const units = { select(provider, tiers) { return accounts.filter((a) => a.provider === provider && (!tiers || tiers.includes(a.tier))); } };
@@ -167,6 +168,7 @@ describe("recursive keyed-model algebra", () => {
       "ollama-cloud/deepseek-v4.1-flash:1017",
       "cline-pass/deepseek-v4.1-flash-1017",
       "ctyun/deepseek-v4.1-flash",
+      "commandcode/deepseek/deepseek-v4.1-flash",
     ];
     const at = when("2026-10-31T14:00:00Z");
     const candidates = policy.candidates("lazy/task", "peak", units, at).candidates;
@@ -188,9 +190,14 @@ describe("recursive keyed-model algebra", () => {
     expect(fast(mistralDeepSeek)[0].model).toBe(mistralDeepSeek);
     expect(fast(deepseek[0])[0].model).toBe(deepseek[0]);
     expect(fast(deepseek.at(-1))[0].model).toBe(deepseek.at(-1));
+    // Command Code's real V4.1-Flash model, added after all existing channels.
+    expect(topology.children.at(-1)).toEqual({ type: "model",
+      model: "commandcode/deepseek/deepseek-v4.1-flash",
+      tier: null, effort: "max", offPeakOnly: "commandcode" });
     const activePeak = policy.candidates("lazy/task", "peak", units,
       when("2026-10-29T02:00:00Z")).candidates;
     expect(activePeak.some((c) => c.model === deepseek[1])).toBe(false);
+    expect(activePeak.some((c) => c.model === "commandcode/deepseek/deepseek-v4.1-flash")).toBe(false);
     expect(activePeak.some((c) => c.model === "ctyun/deepseek-v4.1-flash")).toBe(true);
     const ollamaPeak = policy.candidates("lazy/task", "peak", units,
       when("2026-10-29T14:00:00Z")).candidates;
@@ -228,6 +235,26 @@ describe("recursive keyed-model algebra", () => {
       when("2026-10-29T02:00:00Z")).candidates.map((c) => c.model));
     expect(holidaySet.has(cline)).toBe(true);
     expect(holidaySet.has(opencode)).toBe(true);
+    // Command Code applies weekday peak hours even on Chinese public holidays.
+    expect(holidaySet.has("commandcode/deepseek/deepseek-v4.1-flash")).toBe(false);
+  });
+
+  test("Command Code DeepSeek V4.1 is off-peak on weekends and weekday boundaries", () => {
+    expect(isCommandCodePeak(when("2026-10-29T01:00:00Z"))).toBe(true);
+    expect(isCommandCodePeak(when("2026-10-29T04:00:00Z"))).toBe(false);
+    expect(isCommandCodePeak(when("2026-10-29T06:00:00Z"))).toBe(true);
+    expect(isCommandCodePeak(when("2026-10-29T10:00:00Z"))).toBe(false);
+    expect(isCommandCodePeak(when("2026-10-31T06:00:00Z"))).toBe(false);
+    // No fabricated holiday exception: direct DeepSeek and reseller differ.
+    const holiday = new ComposedPolicy(undefined, {
+      calendar: { days: new Map([["2026-10-29", { kind: "holiday" }]]) },
+    });
+    const peak=holiday.candidates("lazy/task", "peak", units,
+      when("2026-10-29T02:00:00Z")).candidates;
+    expect(peak.some(c => c.model === "commandcode/deepseek/deepseek-v4.1-flash")).toBe(false);
+    const weekend=policy.candidates("lazy/task", "offpeak", units,
+      when("2026-10-31T02:00:00Z")).candidates;
+    expect(weekend.some(c => c.model === "commandcode/deepseek/deepseek-v4.1-flash")).toBe(true);
   });
 
   test("DeepSeek and Ollama peak windows differ and are end-exclusive", () => {
