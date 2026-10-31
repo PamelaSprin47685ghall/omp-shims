@@ -54,6 +54,7 @@ import { HolidayCalendar, loadHolidayData, PeakSchedule } from "../lib/lazy-rout
 import { InFlightTracker } from "../lib/lazy-router/capacity.js";
 import { ModelCatalog } from "../lib/lazy-router/catalog.js";
 import { withMistralFallback, mistralFallbackModelList } from "../lib/lazy-router/mistral-native-fallback.js";
+import { withCustomProviderFallback, customModelList } from "../lib/lazy-router/custom-provider-fallback.js";
 import { CredentialStore } from "../lib/lazy-router/credentials.js";
 import { GatewayDispatcher } from "../lib/lazy-router/dispatcher.js";
 import { createEventLog, summarizeUpstreamBody } from "../lib/lazy-router/events.js";
@@ -317,15 +318,20 @@ export function install(config, context) {
   context.addFetchHandler(attemptLayer);
   tiers.start();
   wrapServe((handler) => lazyRouterHandler(
-    withMistralFallback(handler, {
-      credentials,
-      nativeRegistered: (model) => catalog.hasNativeModel(model),
-      tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
-    }),
+    withCustomProviderFallback(
+      withMistralFallback(handler, {
+        credentials,
+        nativeRegistered: (model) => catalog.hasNativeModel(model),
+        tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+      }), {
+        nativeRegistered: (model) => catalog.hasNativeModel(model),
+        tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+      },
+    ),
     {
       router, dispatcher, statusPath: config.statusPath,
       gatewayTokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
-      extraModels: mistralFallbackModelList(),
+      extraModels: [...mistralFallbackModelList(), ...customModelList()],
     },
   ));
   context.log?.("lazy-router: enabled", { routes: router.policy.routeNames });
