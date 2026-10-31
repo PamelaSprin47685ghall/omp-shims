@@ -55,6 +55,8 @@ import { InFlightTracker } from "../lib/lazy-router/capacity.js";
 import { ModelCatalog } from "../lib/lazy-router/catalog.js";
 import { withMistralFallback, mistralFallbackModelList } from "../lib/lazy-router/mistral-native-fallback.js";
 import { withCustomProviderFallback, customModelList } from "../lib/lazy-router/custom-provider-fallback.js";
+import { withExtensionFallback } from "../lib/lazy-router/extension-fallback.js";
+import { extensionModelList } from "../lib/lazy-router/extension-providers.js";
 import { CredentialStore } from "../lib/lazy-router/credentials.js";
 import { GatewayDispatcher } from "../lib/lazy-router/dispatcher.js";
 import { createEventLog, summarizeUpstreamBody } from "../lib/lazy-router/events.js";
@@ -249,7 +251,8 @@ export function lazyRouterHandler(
     const page = statusPage(request.method, pathname);
     if (page) return page;
     if (request.method === "GET") {
-      if (pathname === MODELS_PATH) return withLazyModels(await handler(request, server), [...router.advertisedModels(), ...extraModels]);
+      if (pathname === MODELS_PATH) return withLazyModels(await handler(request, server),
+        [...router.advertisedModels(), ...(typeof extraModels === "function" ? extraModels() : extraModels)]);
       if (pathname === statusPath) return router.status();
       return handler(request, server);
     }
@@ -318,12 +321,18 @@ export function install(config, context) {
   context.addFetchHandler(attemptLayer);
   tiers.start();
   wrapServe((handler) => lazyRouterHandler(
-    withCustomProviderFallback(
-      withMistralFallback(handler, {
+    withExtensionFallback(
+      withCustomProviderFallback(
+        withMistralFallback(handler, {
+          credentials,
+          nativeRegistered: (model) => catalog.hasNativeModel(model),
+          tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+        }), {
+          nativeRegistered: (model) => catalog.hasNativeModel(model),
+          tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+        },
+      ), {
         credentials,
-        nativeRegistered: (model) => catalog.hasNativeModel(model),
-        tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
-      }), {
         nativeRegistered: (model) => catalog.hasNativeModel(model),
         tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
       },
@@ -331,7 +340,7 @@ export function install(config, context) {
     {
       router, dispatcher, statusPath: config.statusPath,
       gatewayTokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
-      extraModels: [...mistralFallbackModelList(), ...customModelList()],
+      extraModels: () => [...mistralFallbackModelList(), ...customModelList(), ...extensionModelList()],
     },
   ));
   context.log?.("lazy-router: enabled", { routes: router.policy.routeNames });

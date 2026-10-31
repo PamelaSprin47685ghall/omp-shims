@@ -20,6 +20,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { activePin } from "../lib/credential-pin.js";
+import { publishExtensionProvider } from "../lib/lazy-router/extension-providers.js";
 import { installOpenAiApiFlex } from "../lib/openai-api-flex.js";
 import { stableIdentityOAuth } from "../lib/oauth-identity.js";
 import {
@@ -456,6 +457,7 @@ export async function install(config, context) {
                 config: prepared,
                 source: PLUGIN_SOURCE + ":" + pkg.name,
               });
+              if (id === "kiro") publishExtensionProvider(id, prepared);
               tokens.set(id, resolveToken(id));
             }),
           );
