@@ -53,6 +53,7 @@ import { createAttemptLayer } from "../lib/lazy-router/attempt.js";
 import { HolidayCalendar, loadHolidayData, PeakSchedule } from "../lib/lazy-router/calendar.js";
 import { InFlightTracker } from "../lib/lazy-router/capacity.js";
 import { ModelCatalog } from "../lib/lazy-router/catalog.js";
+import { withMistralFallback, mistralFallbackModelList } from "../lib/lazy-router/mistral-native-fallback.js";
 import { CredentialStore } from "../lib/lazy-router/credentials.js";
 import { GatewayDispatcher } from "../lib/lazy-router/dispatcher.js";
 import { createEventLog, summarizeUpstreamBody } from "../lib/lazy-router/events.js";
@@ -195,7 +196,7 @@ export function createLazyRouter(config, { log = report } = {}) {
       : undefined,
   });
 
-  return { router, dispatcher, catalog, tiers, attemptLayer };
+  return { router, dispatcher, catalog, tiers, attemptLayer, credentials };
 }
 
 /**
@@ -214,6 +215,7 @@ export function lazyRouterHandler(
     statusPath,
     gatewayTokenPath = join(homedir(), ".omp", "auth-gateway.token"),
     statusPage = createStatusPage({ statusPath, statusView: () => router.statusView() }),
+    extraModels = [],
   },
 ) {
   return async function lazyRouterInbound(request, server) {
@@ -242,7 +244,7 @@ export function lazyRouterHandler(
     const page = statusPage(request.method, pathname);
     if (page) return page;
     if (request.method === "GET") {
-      if (pathname === MODELS_PATH) return withLazyModels(await handler(request, server), router.advertisedModels());
+      if (pathname === MODELS_PATH) return withLazyModels(await handler(request, server), [...router.advertisedModels(), ...extraModels]);
       if (pathname === statusPath) return router.status();
       return handler(request, server);
     }
@@ -303,16 +305,24 @@ export function install(config, context) {
     return;
   }
   preferCodexHttp(config);
-  const { router, dispatcher, catalog, tiers, attemptLayer } = createLazyRouter(config);
+  const { router, dispatcher, catalog, tiers, attemptLayer, credentials } = createLazyRouter(config);
 
   if (!catalog.observe(globalThis.__OMP_SHIMS_HOST__)) {
     report("lazy-router: host capture unavailable (is registry-capture.js preloaded first?); routes will be empty");
   }
   context.addFetchHandler(attemptLayer);
   tiers.start();
-  wrapServe((handler) => lazyRouterHandler(handler, {
-    router, dispatcher, statusPath: config.statusPath,
-    gatewayTokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
-  }));
+  wrapServe((handler) => lazyRouterHandler(
+    withMistralFallback(handler, {
+      credentials,
+      nativeRegistered: (model) => catalog.hasNativeModel(model),
+      tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+    }),
+    {
+      router, dispatcher, statusPath: config.statusPath,
+      gatewayTokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+      extraModels: mistralFallbackModelList(),
+    },
+  ));
   context.log?.("lazy-router: enabled", { routes: router.policy.routeNames });
 }
