@@ -117,6 +117,12 @@
             "type": "model",
             "model": "ctyun/deepseek-v4.1-flash",
             "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "commandcode/deepseek/deepseek-v4.1-flash",
+            "effort": "max",
+            "offPeakOnly": "commandcode"
           }
         ]
       }
