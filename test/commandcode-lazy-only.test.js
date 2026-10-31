@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runPinned } from "../lib/credential-pin.js";
+import { Attempt } from "../lib/lazy-router/attempt.js";
 import { publishExtensionProvider, extensionTraits } from "../lib/lazy-router/extension-providers.js";
 import { withExtensionFallback } from "../lib/lazy-router/extension-fallback.js";
 import { lazyRouterHandler } from "../features/lazy-router.js";
@@ -96,12 +97,24 @@ describe("pinned Command Code calls the installed plugin instead of OMP built-in
       expect(hits).toBe(0);
       // The public Gateway allowed the Lazy request before pinning it.
       // Its scoped bearer must not prevent a trusted pinned internal attempt.
-      const scoped=await runPinned({provider:"commandcode",credentialId:44},
+      // Real stock OMP Command Code units have no credentialId. Require the
+      // Router's Attempt scope and resolve the active account from its DB.
+      const pending=new Attempt({
+        unit:{provider:"commandcode",label:"commandcode"},
+        model:COMMAND,
+      });
+      const scoped=await runPinned(pending,
         ()=>gateway(request("scoped-client-token")));
       expect(scoped.status).toBe(200);
       expect((await scoped.json()).choices[0].message.content).toBe("OK");
-      const ok=await runPinned({provider:"commandcode",credentialId:44},
+      // An arbitrary object resembling a pin is not a trusted Attempt.
+      const forged=await runPinned({provider:"commandcode",credentialId:44},
         ()=>gateway(request()));
+      expect(forged.status).toBe(403);
+      const ok=await runPinned(new Attempt({
+        unit:{provider:"commandcode",credentialId:44,label:"commandcode"},
+        model:COMMAND,
+      }),()=>gateway(request()));
       expect(ok.status).toBe(200);
       const data=await ok.json();
       expect(data.usage.prompt_tokens_details.cached_tokens).toBe(9);
