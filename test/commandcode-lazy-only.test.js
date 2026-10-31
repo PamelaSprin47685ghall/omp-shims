@@ -93,16 +93,19 @@ describe("pinned Command Code calls the installed plugin instead of OMP built-in
           messages:[{role:"user",content:"OK"}],max_tokens:16,reasoning_effort:"max"}),
       });
       expect((await gateway(request())).status).toBe(403); // not pinned
-      expect((await runPinned({provider:"commandcode",credentialId:44},
-        ()=>gateway(request("bad-token")))).status).toBe(403);
       expect(hits).toBe(0);
+      // The public Gateway allowed the Lazy request before pinning it.
+      // Its scoped bearer must not prevent a trusted pinned internal attempt.
+      const scoped=await runPinned({provider:"commandcode",credentialId:44},
+        ()=>gateway(request("scoped-client-token")));
+      expect(scoped.status).toBe(200);
+      expect((await scoped.json()).choices[0].message.content).toBe("OK");
       const ok=await runPinned({provider:"commandcode",credentialId:44},
         ()=>gateway(request()));
       expect(ok.status).toBe(200);
       const data=await ok.json();
-      expect(data.choices[0].message.content).toBe("OK");
       expect(data.usage.prompt_tokens_details.cached_tokens).toBe(9);
-      expect(hits).toBe(1);
+      expect(hits).toBe(2);
     }finally{rmSync(dir,{recursive:true,force:true});}
   });
 });
