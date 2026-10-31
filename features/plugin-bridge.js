@@ -457,7 +457,7 @@ export async function install(config, context) {
                 config: prepared,
                 source: PLUGIN_SOURCE + ":" + pkg.name,
               });
-              if (id === "kiro") publishExtensionProvider(id, prepared);
+              if (id === "kiro" || id === "commandcode") publishExtensionProvider(id, prepared);
               tokens.set(id, resolveToken(id));
             }),
           );

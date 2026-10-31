@@ -46,7 +46,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { report } from "../lib/bootstrap.js";
 import { isGatewayProcess } from "../lib/gateway-process.js";
-import { readBody, withBody, withUsageRequest, wrapServe } from "../lib/inbound.js";
+import { readBody, wrapServe } from "../lib/inbound.js";
+import { disallowedClientModelRequest, forbiddenModelResponse, lazyOnlyModelCatalog } from "../lib/lazy-router/client-model-policy.js";
 import { AdmissionControl } from "../lib/lazy-router/admission.js";
 import { PrefixAffinity } from "../lib/lazy-router/affinity.js";
 import { createAttemptLayer } from "../lib/lazy-router/attempt.js";
@@ -251,15 +252,13 @@ export function lazyRouterHandler(
     const page = statusPage(request.method, pathname);
     if (page) return page;
     if (request.method === "GET") {
-      if (pathname === MODELS_PATH) return withLazyModels(await handler(request, server),
-        [...router.advertisedModels(), ...(typeof extraModels === "function" ? extraModels() : extraModels)]);
+      if (pathname === MODELS_PATH) return lazyOnlyModelCatalog(
+        await handler(request, server), router.advertisedModels());
       if (pathname === statusPath) return router.status();
       return handler(request, server);
     }
 
     const format = request.method === "POST" ? formatForPath(pathname) : undefined;
-    if (!format) return handler(request, server);
-
     const text = await readBody(request);
     let body;
     try {
@@ -267,23 +266,12 @@ export function lazyRouterHandler(
     } catch {
       body = undefined;
     }
-    if (!body || !router.handles(body.model)) {
-      // A direct model id: the gateway serves it, but its latency and speed
-      // belong in the same per-model window as the routed ones. Ask for the
-      // usage frame the speed is computed from, which the gateway only emits
-      // when the client requests it.
-      const startedAt = Date.now();
-      const usage = text ? withUsageRequest(pathname, text) : undefined;
-      const forwarded = usage === undefined ? request : withBody(request, usage);
-      const proof = router.beginDirectProof(body?.model);
-      try {
-        const answer = await handler(forwarded, server);
-        return router.measureDirect(body?.model, answer, startedAt, format, request.signal, proof);
-      } catch (error) {
-        proof?.finish(false);
-        throw error;
-      }
-    }
+    // No direct model selection from clients. The Lazy Router dispatcher
+    // uses the captured inner host handler for pinned concrete attempts.
+    if (disallowedClientModelRequest({
+      method: request.method, pathname, body, router, supportedFormat: Boolean(format),
+    })) return forbiddenModelResponse();
+    if (!format) return handler(request, server);
     return router.serve(format, body, request);
   };
 }
