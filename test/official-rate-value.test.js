@@ -134,11 +134,12 @@ describe("published model API price equivalent, never actual subscription billin
       totals.close();
     }finally { rmSync(dir,{recursive:true,force:true}); }
   });
-  test("GLM Flash Lazy Task effort is max and other tasks are untouched",()=>{
+  test("Mistral DeepSeek replaces GLM in Lazy Task, effort max and other tasks untouched",()=>{
     const policy=new ComposedPolicy();
     const graph=policy.routeTopology()["lazy/task"].graph;
-    const glm=graph.children.find((x)=>x.model==="mistral-vibe/zai-glm-5-3-flash");
-    expect(glm.effort).toBe("max");
+    const deepseek=graph.children.find((x)=>x.model==="mistral-vibe/deepseek-v4-1-flash-1017");
+    expect(deepseek.effort).toBe("max");
+    expect(graph.children.some((x)=>x.model==="mistral-vibe/zai-glm-5-3-flash")).toBe(false);
     expect(graph.children.find((x)=>x.model==="ctyun/deepseek-v4.1-flash").effort).toBe("max");
   });
 });

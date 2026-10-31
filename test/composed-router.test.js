@@ -90,8 +90,8 @@ describe("recursive keyed-model algebra", () => {
     expect(onlyFlex.map((c) => c.model)).toEqual(["openai-api/gpt-6.1-terra"]);
   });
 
-  test("Mistral GLM Flash has 20 concurrent slots for each Key, not 20 shared across Keys", () => {
-    const model = "mistral-vibe/zai-glm-5-3-flash";
+  test("Mistral DeepSeek has 20 concurrent slots per Key, not shared", () => {
+    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
     const key1 = { provider: "mistral-vibe", key: "mistral-vibe/31", label: "mistral-vibe#1" };
     const key2 = { provider: "mistral-vibe", key: "mistral-vibe/42", label: "mistral-vibe#2" };
     const first = policy.capacityUnit({ unit: key1, model });
@@ -126,7 +126,7 @@ describe("recursive keyed-model algebra", () => {
 
   test("multiple Mistral keys receive one shared speed prediction", () => {
     const at = when("2026-10-29T12:00:00Z");
-    const model = "mistral-vibe/zai-glm-5-3-flash";
+    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
     const calls = [];
     const speed = { predict(name) { calls.push(name); return { totalMs: 2300, rd: 0.2, weight: 90 }; } };
     const result = ranked("lazy/task", at, { speed });
@@ -159,8 +159,8 @@ describe("recursive keyed-model algebra", () => {
     expect(raw.filter((c) => c.model === "google-antigravity/gemini-4-argon")).toHaveLength(2);
   });
 
-  test("Lazy Task excludes uncached Mistral DeepSeek and keeps all five other DeepSeek models", () => {
-    const glm = "mistral-vibe/zai-glm-5-3-flash";
+  test("Lazy Task uses Mistral DeepSeek in place of GLM, alongside five other DeepSeek channels", () => {
+    const mistralDeepSeek = "mistral-vibe/deepseek-v4-1-flash-1017";
     const deepseek = [
       "charm-hyper/deepseek-v4.1-flash-1017",
       "opencode-go/deepseek-v4.1-flash",
@@ -170,12 +170,14 @@ describe("recursive keyed-model algebra", () => {
     ];
     const at = when("2026-10-31T14:00:00Z");
     const candidates = policy.candidates("lazy/task", "peak", units, at).candidates;
-    expect(candidates.some((c) => c.model === "mistral-vibe/deepseek-v4-1-flash-1017")).toBe(false);
-    expect(candidates.filter((c) => c.model === glm)).toHaveLength(2);
-    expect(new Set(candidates.map((c) => c.model))).toEqual(new Set([glm, ...deepseek]));
+    expect(candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
+    expect(candidates.filter((c) => c.model === mistralDeepSeek)).toHaveLength(2);
+    expect(new Set(candidates.map((c) => c.model))).toEqual(new Set([mistralDeepSeek, ...deepseek]));
     const topology = policy.routeTopology()["lazy/task"].graph;
     expect(topology.type).toBe("rating");
-    expect(topology.children.map((c) => c.model)).toEqual([glm, ...deepseek]);
+    expect(topology.children.map((c) => c.model)).toEqual([mistralDeepSeek, ...deepseek]);
+    expect(topology.children[0]).toEqual({ type: "model", model: mistralDeepSeek,
+      tier: null, effort: "max", offPeakOnly: null });
     // Neither model is forced ahead. The same scoring mechanism may pick either.
     const fast = (fastModel) => ranked("lazy/task", at, {
       random: () => 0.5,
@@ -183,7 +185,7 @@ describe("recursive keyed-model algebra", () => {
         return { totalMs: model === fastModel ? 10 : 100000, rd: 0.1, weight: 100 };
       } },
     });
-    expect(fast(glm)[0].model).toBe(glm);
+    expect(fast(mistralDeepSeek)[0].model).toBe(mistralDeepSeek);
     expect(fast(deepseek[0])[0].model).toBe(deepseek[0]);
     expect(fast(deepseek.at(-1))[0].model).toBe(deepseek.at(-1));
     const activePeak = policy.candidates("lazy/task", "peak", units,
@@ -240,7 +242,7 @@ describe("recursive keyed-model algebra", () => {
     expect(isOllamaPeak(when("2026-10-31T12:00:00Z"))).toBe(false);
   });
 
-  test("GLM warm conversation always stays on its cached account across RNG values", () => {
+  test("Mistral DeepSeek warm conversation stays on its cached account across RNG values", () => {
     const at = when("2026-10-29T12:00:00Z");
     for (const randomValue of [0, 0.2, 0.5, 0.8, 0.999]) {
       const warm = ranked("lazy/task", at, {
@@ -248,14 +250,14 @@ describe("recursive keyed-model algebra", () => {
         cachedShare: (c) => c.unit.key === "m2" ? 0.5 : 0,
         cachedBytes: (c) => c.unit.key === "m2" ? 30000 : 0,
       });
-      const glmKeys = warm.filter((c) => c.model === "mistral-vibe/zai-glm-5-3-flash");
-      expect(glmKeys.map((c) => c.unit.key)).toEqual(["m2", "m1"]);
+      const deepSeekKeys = warm.filter((c) => c.model === "mistral-vibe/deepseek-v4-1-flash-1017");
+      expect(deepSeekKeys.map((c) => c.unit.key)).toEqual(["m2", "m1"]);
     }
     // When the warm account fails, the other account remains available.
     expect(ranked("lazy/task", at, {
       available: (c) => c.unit.key !== "m2",
       cachedBytes: (c) => c.unit.key === "m2" ? 30000 : 0,
-    }).filter((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")
+    }).filter((c) => c.model === "mistral-vibe/deepseek-v4-1-flash-1017")
       .map((c) => c.unit.key)).toEqual(["m1"]);
   });
 

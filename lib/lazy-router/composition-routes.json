@@ -81,13 +81,13 @@
       }
     },
     "lazy/task": {
-      "displayName": "Lazy Task · GLM Flash + DeepSeek (competitive)",
+      "displayName": "Lazy Task · DeepSeek (competitive)",
       "graph": {
         "type": "rating",
         "children": [
           {
             "type": "model",
-            "model": "mistral-vibe/zai-glm-5-3-flash",
+            "model": "mistral-vibe/deepseek-v4-1-flash-1017",
             "effort": "max"
           },
           {
