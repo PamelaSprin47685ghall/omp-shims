@@ -1,4 +1,4 @@
-// Gateway-only, provider-neutral sequencing of downstream Chat SSE content.
+// Gateway-only two-phase sequencing of Chat, Responses and Messages SSE content.
 import { isGatewayProcess } from "../lib/gateway-process.js";
 import { wrapServe } from "../lib/inbound.js";
 import { withReasoningOrder } from "../lib/reasoning-order.js";
@@ -8,5 +8,5 @@ export function install(config, context) {
   wrapServe((handler) => withReasoningOrder(handler, {
     maxBufferBytes: config.maxBufferBytes ?? 16 * 1024 * 1024,
   }));
-  context.log?.("reasoning-order: two-phase Chat SSE enabled");
+  context.log?.("reasoning-order: two-phase Chat, Responses and Messages SSE enabled");
 }

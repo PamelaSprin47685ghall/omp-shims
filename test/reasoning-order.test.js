@@ -100,7 +100,7 @@ describe("strict reasoning-before-body SSE shim", () => {
   test("request filtering leaves non-SSE, failed, and other dialects unchanged", async () => {
     const response = new Response(frame({ content: "body" }) + done, { headers });
     const handler = withReasoningOrder(async () => response);
-    const actual = await handler(new Request("http://gateway.test/v1/responses", { method: "POST" }));
+    const actual = await handler(new Request("http://gateway.test/v1/embeddings", { method: "POST" }));
     expect(actual).toBe(response);
     const json = new Response("{}", { headers: { "content-type": "application/json" } });
     expect(await withReasoningOrder(async () => json)(
