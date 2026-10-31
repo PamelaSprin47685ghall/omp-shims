@@ -241,6 +241,10 @@ export function lazyRouterHandler(
       });
     }
 
+    // Even a read-only status page must reflect the stock host catalog.
+    if (request.method === "GET" && (pathname === statusPath || pathname === "/")) {
+      if (typeof router.ensureCatalog === "function") await router.ensureCatalog();
+    }
     const page = statusPage(request.method, pathname);
     if (page) return page;
     if (request.method === "GET") {
