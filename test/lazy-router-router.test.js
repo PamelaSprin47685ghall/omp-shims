@@ -91,7 +91,8 @@ const CATALOG = {
  * real attempt layer, and answers like the auth-gateway does (502 on upstream
  * errors; a 200 event stream opened before upstream answers when streaming).
  */
-function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
+function harness({ upstream, faults = {}, bypass, policy = POLICY,
+  clientModel = "lazy/default" }) {
   const events = [];
   const emit = (event, detail = {}) => events.push({ event, ...detail });
   const timers = [];
@@ -188,7 +189,7 @@ function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
   });
 
   const send = (body, { signal } = {}) => {
-    const full = { model: "lazy/default", messages: [{ role: "user", content: "hi" }], ...body };
+    const full = { model: clientModel, messages: [{ role: "user", content: "hi" }], ...body };
     const request = new Request("http://gateway.test/v1/chat/completions", {
       method: "POST",
       headers: { authorization: "Bearer client" },
@@ -801,6 +802,79 @@ describe("prefix affinity and capacity", () => {
       window: 3,
     });
     expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("lazy/task rescues healthy idle limited units rejected only by cache admission", async () => {
+    const policy = {
+      ...LIMITED,
+      routes: { ...POLICY.routes,
+        task: { input: ["text"], periods: {
+          peak: [{ model: "p/big", tier: "gold" }],
+        } },
+      },
+    };
+    const h = harness({ policy, clientModel: "lazy/task", upstream: ok });
+    const units = h.router.units.select("p");
+    expect(units).toHaveLength(2);
+    // A warm 5-minute window rejects a new uncached prompt on both units.
+    for (const unit of units) {
+      h.router.admission.evaluate(unit.key, 0.95, 1);
+    }
+    const response = await h.send({});
+    expect(response.status).toBe(200);
+    expect(servedBy(response)).toBe("p:gold#1");
+    expect(h.calls).toHaveLength(1);
+    expect(h.events.filter(e => e.event === "held-back" &&
+      e.reason === "admission")).toHaveLength(2);
+    expect(h.events.filter(e => e.event === "admission-rescue")).toHaveLength(1);
+    expect(h.names()).not.toContain("exhausted");
+    await response.text();
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("lazy/task rescue never exceeds hard maxInFlight, even when all units are healthy", async () => {
+    const policy = {
+      ...LIMITED,
+      routes: { ...POLICY.routes,
+        task: { input: ["text"], periods: {
+          peak: [{ model: "p/big", tier: "gold" }],
+        } },
+      },
+    };
+    const h = harness({ policy, clientModel: "lazy/task", upstream: ok });
+    const slots = h.router.units.select("p").map(unit => h.router.capacity.slot(unit));
+    try {
+      const response = await h.send({});
+      expect(response.status).toBe(503);
+      expect(h.calls).toHaveLength(0);
+      expect(h.names()).not.toContain("admission-rescue");
+      expect(inFlight(h)).toEqual([1, 1]);
+    } finally {
+      for (const slot of slots) slot.releaseAll();
+    }
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("lazy/task rescue tries another idle unit if the first one fails upstream", async () => {
+    const policy = {
+      ...LIMITED,
+      routes: { ...POLICY.routes,
+        task: { input: ["text"], periods: {
+          peak: [{ model: "p/big", tier: "gold" }],
+        } },
+      },
+    };
+    const h = harness({
+      policy, clientModel: "lazy/task",
+      upstream: call => call.unit === "p:gold#1" ? quota() : ok(),
+    });
+    const units = h.router.units.select("p");
+    for (const unit of units) h.router.admission.evaluate(unit.key, 0.95, 1);
+    const response = await h.send({});
+    expect(response.status).toBe(200);
+    expect(servedBy(response)).toBe("p:gold#2");
+    expect(h.events.filter(e => e.event === "admission-rescue")).toHaveLength(2);
+    expect(h.names()).toContain("cooldown-enter");
   });
 
   test("the status view shows load for limited units only, and the affinity counters", async () => {
