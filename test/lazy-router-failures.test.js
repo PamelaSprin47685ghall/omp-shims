@@ -49,7 +49,7 @@ describe("classifyFailure", () => {
     expect(classifyFailure(outcome({ status: 429, source: "upstream", message: '{"error":"quota"}' }))).toBe(
       FAILURE.UNIT,
     );
-    expect(classifyFailure(outcome({ status: 503, source: "upstream", message: "overloaded" }))).toBe(FAILURE.UNIT);
+    expect(classifyFailure(outcome({ status: 503, source: "upstream", message: "overloaded" }))).toBe(FAILURE.TRANSIENT);
   });
 
   test("temporary limits receive a short probe, while quota and unknown 429 stay unchanged", () => {
@@ -60,6 +60,36 @@ describe("classifyFailure", () => {
     expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "Too Many Requests" }), undefined, "openai-codex")).toBe(FAILURE.UNIT);
     expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "Too Many Requests" }, false), undefined, "mistral-vibe")).toBe(FAILURE.UNIT);
     expect(classifyFailure(outcome({ status: 429, source: "upstream", message: "User Provided API Key Rate Limit Exceeded" }), undefined, "cline-pass")).toBe(FAILURE.QUOTA);
+  });
+
+  test("real upstream temporary failures get 30-second classification across providers", () => {
+    for (const provider of ["mistral-vibe", "openai-api", "ollama-cloud", "openai-codex"]) {
+      for (const status of [408, 500, 502, 503, 504]) {
+        expect(classifyFailure(outcome({ status, source: "upstream",
+          message: "Service Unavailable" }), undefined, provider)).toBe(FAILURE.TRANSIENT);
+      }
+    }
+    expect(classifyFailure(outcome({ status: 502, source: "stream",
+      message: "Upstream status 503: Service Unavailable" }))).toBe(FAILURE.TRANSIENT);
+    expect(classifyFailure(outcome({ status: 502, source: "network",
+      message: "ETIMEDOUT" }, false))).toBe(FAILURE.TRANSIENT);
+  });
+
+  test("quota wins over temporary status, unknown errors remain conservative", () => {
+    expect(classifyFailure(outcome({ status: 503, source: "upstream",
+      message: "insufficient_quota" }), undefined, "mistral-vibe")).toBe(FAILURE.QUOTA);
+    expect(classifyFailure(outcome({ status: 429, source: "upstream",
+      message: "Weekly usage limit reached" }), undefined, "openai-codex")).toBe(FAILURE.QUOTA);
+    expect(classifyFailure(outcome({ status: 429, source: "upstream",
+      message: "Too Many Requests" }), undefined, "openai-codex")).toBe(FAILURE.UNIT);
+    expect(classifyFailure(outcome({ status: 502, source: "network",
+      message: "Unsupported content" }), undefined, "openai-api")).toBe(FAILURE.UNIT);
+    expect(classifyFailure(outcome({ status: 502, source: "gateway",
+      message: "Service Unavailable" }), undefined, "mistral-vibe")).toBe(FAILURE.UNIT);
+    expect(classifyFailure(outcome({ status: 503, source: "upstream",
+      message: "Service Unavailable" }, false), undefined, "mistral-vibe")).toBe(FAILURE.UNIT);
+    expect(classifyFailure(outcome({ status: 429, source: "upstream",
+      message: "requests per minute; retry-after 30" }), undefined, "openai-codex")).toBe(FAILURE.THROTTLE);
   });
 
   test("qoder's reformatted quota codes cool the unit without a probe", () => {
@@ -75,7 +105,7 @@ describe("classifyFailure", () => {
   test("qoder hard capacity is account-scoped and cools immediately without a probe", () => {
     const message =
       "[Qoder CN 无可用容量] 网关回 serviceAvailable:false（子码 RESOURCE_LIMIT，队列长度 0，优先级通道 p3，模型 qfmodel）";
-    expect(classifyFailure(outcome({ status: 502, source: "stream", message }))).toBe(FAILURE.QUOTA);
+    expect(classifyFailure(outcome({ status: 502, source: "stream", message }), undefined, "qoder-cn")).toBe(FAILURE.TRANSIENT);
   });
 
   test("a provider/host adapter bug is not quota and must never cool a valid account", () => {

@@ -291,6 +291,51 @@ describe("LazyRouter", () => {
     expect(h.names()).toContain("cooldown-exit");
   });
 
+  test("Mistral upstream 503 cools 30 seconds, skips immediate probe, then restores", async () => {
+    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const custom = { ...POLICY, routes: { default: {
+      selection: "ordered", input: ["text"],
+      periods: { peak: [{ model }, { model: "q/text" }] },
+    } } };
+    let unavailable = true;
+    const h = harness({ policy: custom, upstream: (call) =>
+      call.unit === "mistral-vibe" && unavailable
+        ? new Response('{"error":"Service Unavailable"}', { status: 503 })
+        : ok(),
+    });
+    const first = await h.send({});
+    expect(first.status).toBe(200);
+    expect(first.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
+    expect(h.calls.map(c => c.unit)).toEqual(["mistral-vibe", "q"]);
+    expect(h.names()).not.toContain("probe");
+    const cooled = h.health.entry("mistral-vibe " + model);
+    expect(cooled).toBeDefined();
+    expect(cooled.probeIntervalMs).toBe(30_000);
+    expect(cooled.nextProbeAt - cooled.since).toBe(30_000);
+    expect(cooled.reason).toContain("transient:");
+    unavailable = false;
+    await h.timers[0]();
+    expect(h.health.isAlive("mistral-vibe " + model)).toBe(true);
+  });
+
+  test("quota 429 and ambiguous errors use exact 30-minute probes", async () => {
+    for (const [code, error] of [
+      [429, '{"error":"insufficient_quota"}'],
+      [418, '{"error":"unknown failure"}'],
+    ]) {
+      const h = harness({ upstream: (call) =>
+        call.unit === "p:gold#1" ? new Response(error, { status: code }) : ok(),
+      });
+      const response = await h.send({});
+      expect(response.status).toBe(200);
+      const cooled = h.health.entry("p/1 p/big");
+      expect(cooled).toBeDefined();
+      expect(cooled.probeIntervalMs).toBe(1_800_000);
+      expect(cooled.nextProbeAt - cooled.since).toBe(1_800_000);
+      expect(cooled.reason.includes("transient:")).toBe(false);
+    }
+  });
+
   test("a failed background probe stays quiet while remaining scheduled", async () => {
     const h = harness({ upstream: (call) => (call.unit === "p:gold#1" ? quota() : ok()) });
     await h.send({});
