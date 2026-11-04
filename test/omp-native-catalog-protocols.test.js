@@ -66,10 +66,9 @@ describe("shared bridge dialects are explicit and preserve usage", () => {
     ]});
     expect(chat.messages[0]).toEqual({
       role:"assistant",
-      content:[
-        { type:"thinking", thinking:[{ type:"text", text:"plan" }], signature:"native-signature" },
-        { type:"text", text:"answer" },
-      ],
+      content:"answer",
+      reasoning_content:"plan",
+      reasoning_signature:"native-signature",
     });
     expect(chat.messages[1]).toEqual({
       role:"user",

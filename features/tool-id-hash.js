@@ -66,7 +66,16 @@ function restoreId(id) {
  * (`tool_call_id`), Anthropic (`tool_use_id`), and the native generate envelope
  * (`toolCallId`, `content[].id`).
  */
-const ID_FIELDS = new Set(["tool_call_id", "tool_use_id", "toolCallId", "toolCallID", "toolId"]);
+const ID_FIELDS = new Set([
+  "tool_call_id",
+  "tool_use_id",
+  "toolUseId",
+  "toolCallId",
+  "toolCallID",
+  "toolId",
+  "call_id",
+  "callId",
+]);
 
 /**
  * Walk a parsed envelope and transform every tool-call id.
@@ -89,6 +98,17 @@ function mapIds(value, transform) {
   if (value === null || typeof value !== "object") return false;
   let changed = false;
 
+  // A tool-use block keeps its call id in `id` and appears in three places:
+  // inside a `content` array (Messages), under `content_block` (Messages SSE),
+  // and under `item` (Responses SSE). Transform it wherever it is found.
+  if ((value.type === "tool_use" || value.type === "tool-call") && typeof value.id === "string") {
+    const next = transform(value.id);
+    if (next !== value.id) {
+      value.id = next;
+      changed = true;
+    }
+  }
+
   if (Array.isArray(value.tool_calls)) {
     for (const call of value.tool_calls) {
       if (!call || typeof call !== "object") continue;
@@ -102,18 +122,10 @@ function mapIds(value, transform) {
 
   if (Array.isArray(value.content)) {
     for (const block of value.content) {
-      if (!block || typeof block !== "object") continue;
-      // A tool call's own id is `id`; its arguments are opaque and not walked.
-      if (block.type === "tool_use" || block.type === "tool-call") {
-        const next = transform(block.id);
-        if (next !== block.id) {
-          block.id = next;
-          changed = true;
-        }
-      }
-      // Anything else (for example an Anthropic `tool_result`) may carry the
-      // id of the call it answers, so it is walked like any other object.
-      else if (mapIds(block, transform)) changed = true;
+      // A tool block's own id is handled by the type rule above; a
+      // `tool_result` may carry the id of the call it answers, so it is walked
+      // like any other object.
+      if (block && typeof block === "object" && mapIds(block, transform)) changed = true;
     }
   }
 
@@ -125,7 +137,11 @@ function mapIds(value, transform) {
         value[key] = next;
         changed = true;
       }
-    } else if (key !== "tool_calls" && key !== "content") {
+    } else if (
+      key !== "tool_calls" &&
+      key !== "content" &&
+      !((value.type === "tool_use" || value.type === "tool-call") && (key === "input" || key === "arguments"))
+    ) {
       const item = value[key];
       if (item !== null && typeof item === "object" && mapIds(item, transform)) changed = true;
     }

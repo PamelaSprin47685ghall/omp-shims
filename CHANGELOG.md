@@ -154,6 +154,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `lazy-router`: Responses and Messages requests to a native Mistral model now
+  carry the caller's reasoning effort (`reasoning.effort`, `output_config.effort`,
+  or an explicit thinking budget). They previously sent none, so the model never
+  produced thinking on the typed routes while `/v1/chat/completions` did.
+- `lazy-router`: the Chat→Messages/Responses bridge keeps reasoning. Messages
+  streams `thinking` and `signature_delta` blocks, Responses streams a
+  `reasoning` item with `response.reasoning_summary_text.*` events, and both
+  non-streaming responses carry the reasoning item. Previously Messages
+  streaming dropped it and Responses reported it only in the terminal event,
+  without an id.
+- `lazy-router`: bridged responses mint protocol-shaped ids (`resp_`, `msg_`,
+  `rs_`, `fc_`) instead of reusing the chat completion's `chatcmpl-`/`shim_`
+  ids, so the id prefix no longer changes with the serving provider.
+- `lazy-router`: thinking replayed through the Chat bridge is written as
+  `reasoning_content` (the only field `openai-chat-server` turns into a
+  thinking block), and Mistral's replayed thinking survives an OMP split
+  reasoning item.
+- `lazy-router`: `responses-wire` keeps reasoning in both directions
+  (`responsesAsChat`, `chatAsResponses`, `responsesSseAsChat`), including
+  `encrypted_content` and the client's `include` list.
+- `tool-id-hash`: restore ids in typed streaming events
+  (`content_block.id`, `item.call_id`) and hash Responses `call_id` pairs, so a
+  tool call and its result keep the same id in Messages and Responses.
+
 - `mistral-vibe`: replayed thinking matches the official Vibe CLI
   `_message_payload`: `{type:"thinking", thinking:[{type:"text", text}]}` plus
   a following text chunk. The CLI does not send `signature` or `closed`.
