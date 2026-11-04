@@ -158,6 +158,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   carry the caller's reasoning effort (`reasoning.effort`, `output_config.effort`,
   or an explicit thinking budget). They previously sent none, so the model never
   produced thinking on the typed routes while `/v1/chat/completions` did.
+- `mistral-vibe`: the response adapter now recognises the original host in the
+  `Host` header when `ipv6-first` rewrote the URL to an address literal. Without
+  it the adapter never matched, so Mistral's structured `thinking` content was
+  not normalized on the typed routes and visible text became `[object Object]`.
 - `lazy-router`: the Chat→Messages/Responses bridge keeps reasoning. Messages
   streams `thinking` and `signature_delta` blocks, Responses streams a
   `reasoning` item with `response.reasoning_summary_text.*` events, and both
