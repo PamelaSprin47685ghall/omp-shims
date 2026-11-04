@@ -21,13 +21,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { activePin } from "../lib/credential-pin.js";
 import { publishExtensionProvider } from "../lib/lazy-router/extension-providers.js";
-import { installOpenAiApiFlex } from "../lib/openai-api-flex.js";
 import { stableIdentityOAuth } from "../lib/oauth-identity.js";
-import {
-  installMistralVibeResponseAdapter,
-  MISTRAL_VIBE_PROVIDER_ID,
-  mistralVibeProviderConfig,
-} from "../lib/mistral-vibe-provider.js";
+import { installOpenAiApiFlex } from "../lib/openai-api-flex.js";
 
 const require_ = createRequire(import.meta.url);
 const PLUGIN_SOURCE = "omp-shims";
@@ -247,34 +242,6 @@ function normalizeCommandCodeContext(context) {
   return { ...context, messages };
 }
 
-/** Adapt pi-ai stream events at the gateway boundary, before the host reads
- * event.content.length. Some host variants check that field on start/delta
- * events too; the original pi-ai events only set delta/partial. This is scoped
- * to the Mistral native adapter so unrelated transports are unchanged.
- */
-export function normalizeNativeMistralEvent(event) {
-  if (!event || typeof event !== "object") return event;
-  if (event.type === "text_end" || event.type === "thinking_end") {
-    if (Array.isArray(event.content)) return event;
-    const text = typeof event.content === "string" ? event.content : (event.content?.text ?? "");
-    const block = event.type === "thinking_end"
-      ? { type: "thinking", thinking: text, thinkingSignature: event.thinkingSignature ?? "" }
-      : { type: "text", text };
-    return { ...event, content: [block] };
-  }
-  // OMP's consumer can inspect .content even for a *_start or *_delta
-  // emitted by the standard pi-ai serializer, which has no such property.
-  if (event.type === "text_start" || event.type === "thinking_start") {
-    return event.content === undefined ? { ...event, content: [] } : event;
-  }
-  if (event.type === "text_delta" || event.type === "thinking_delta") {
-    return event.content === undefined
-      ? { ...event, content: typeof event.delta === "string" ? event.delta : "" }
-      : event;
-  }
-  return event;
-}
-
 function wrapTransportEvents(transport, provider) {
   return function wrappedStreamSimple(model, context, options) {
     const nextContext = provider === "commandcode" ? normalizeCommandCodeContext(context) : context;
@@ -295,9 +262,6 @@ function wrapTransportEvents(transport, provider) {
     const originalPush = stream.push.bind(stream);
     stream.push = (event) => {
       event = normalizeQoderCapacityEvent(provider, event);
-      if (provider === MISTRAL_VIBE_PROVIDER_ID) {
-        return originalPush(normalizeNativeMistralEvent(event));
-      }
       if (event?.type !== "text_end" && event?.type !== "thinking_end") return originalPush(event);
       if (Array.isArray(event.content)) return originalPush(event);
       const { content, ...rest } = event;
@@ -314,7 +278,6 @@ function wrapTransportEvents(transport, provider) {
 
 export async function install(config, context) {
   const log = context.log ?? (() => {});
-  installMistralVibeResponseAdapter(context);
   installOpenAiApiFlex(context);
   const pluginsDir = config.pluginsDir ?? join(homedir(), ".omp", "plugins");
   // Token specs are provider-agnostic and live outside `features`, so they are
@@ -354,8 +317,6 @@ export async function install(config, context) {
   // it cannot await plugin loading; this cache lets it replace any built-in
   // provider before returning the very first model snapshot.
   const preparedProviders = new Map();
-  const internalProviders = [{ id: MISTRAL_VIBE_PROVIDER_ID, config: mistralVibeProviderConfig() }];
-
   let oauthBridgeUnavailableLogged = false;
 
   function registerOauthConfig(registerOauth, id, oauth) {
@@ -417,7 +378,7 @@ export async function install(config, context) {
       try {
         registry.registerProvider(id, prepared.config, prepared.source);
       } catch (error) {
-        log("plugin-bridge: registerProvider(" + id + ") failed: " + error.message);
+        log(`plugin-bridge: registerProvider(${id}) failed: ${error.message}`);
       }
     }
   }
@@ -431,9 +392,6 @@ export async function install(config, context) {
    * modules are cached by the module loader, so the double init is cheap.
    */
   const eagerInit = (async () => {
-    for (const { id, config: providerConfig } of internalProviders) {
-      if (providerConfig.oauth) bridgeOauth(id, providerConfig.oauth);
-    }
     for (const pkg of packages) {
       for (const entry of pkg.entries) {
         let module;
@@ -455,7 +413,7 @@ export async function install(config, context) {
               if (!prepared) return;
               preparedProviders.set(id, {
                 config: prepared,
-                source: PLUGIN_SOURCE + ":" + pkg.name,
+                source: `${PLUGIN_SOURCE}:${pkg.name}`,
               });
               if (id === "kiro" || id === "commandcode") publishExtensionProvider(id, prepared);
               tokens.set(id, resolveToken(id));
@@ -475,17 +433,6 @@ export async function install(config, context) {
     const task = (async () => {
       const sources = new Set();
       const discoverableProviders = new Set();
-      for (const { id, config: providerConfig } of internalProviders) {
-        try {
-          registry.registerProvider(id, prepareProvider(id, providerConfig), `${PLUGIN_SOURCE}:internal`);
-          if (providerConfig.oauth) bridgeOauth(id, providerConfig.oauth);
-          sources.add(`${PLUGIN_SOURCE}:internal`);
-          if (typeof providerConfig.fetchDynamicModels === "function") discoverableProviders.add(id);
-          logOnChange(`provider:${id}`, `plugin-bridge: registered ${id} (${providerConfig.models?.length ?? 0} models) from omp-shims`);
-        } catch (error) {
-          log(`plugin-bridge: registerProvider(${id}) failed: ${error.message}`);
-        }
-      }
       for (const pkg of packages) {
         for (const entry of pkg.entries) {
           let module;

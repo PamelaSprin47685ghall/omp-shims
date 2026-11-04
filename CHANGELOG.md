@@ -130,6 +130,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `lazy-router`: the status JSON and page show the in-flight load of limited units
   and the affinity map's size and hit rate.
 
+### Removed
+
+- The hand-written `mistral-vibe` provider, transport, browser login and gateway
+  fallback. OMP now ships a native `mistral` provider (`/login mistral`); its
+  official `openai-completions` transport handles Mistral's structured
+  `thinking` content through `mistral-reasoning-content-parts`. Lazy routes now
+  use `mistral/*`, and the shim no longer overrides the provider's error
+  classification or response stream.
+
 ### Changed
 
 - `lazy-router`: `mistral-vibe/zai-glm-5-3-flash` is the first medium-tier fallback in `lazy/default`; `xai-oauth/grok-4.7` is no longer routed by Lazy.

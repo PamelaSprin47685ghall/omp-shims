@@ -4,12 +4,14 @@ import { withBody, withInboundRewrite } from "../lib/inbound.js";
 
 describe("provider-neutral Gateway optional-null compatibility", () => {
   const original = {
-    model: "mistral-vibe/deepseek-v4-1-flash-1017",
+    model: "mistral/deepseek-v4-1-flash-1017",
     messages: [
       { role: "system", content: "Synthetic text." },
-      { role: "assistant", content: null, tool_calls: [
-        { id: "call_1", type: "function", function: { name: "run", arguments: "{}" } },
-      ] },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: "call_1", type: "function", function: { name: "run", arguments: "{}" } }],
+      },
       { role: "tool", tool_call_id: "call_1", content: null },
     ],
     tools: null,
@@ -33,12 +35,9 @@ describe("provider-neutral Gateway optional-null compatibility", () => {
 
   test("preserves explicit empty tools, object metadata, and unspecified optional fields", () => {
     const shape = { ...original, tools: [], metadata: {}, tool_choice: null };
-    expect(normalizeGatewayOptionalNulls("/v1/chat/completions", JSON.stringify(shape)))
-      .toBeUndefined();
+    expect(normalizeGatewayOptionalNulls("/v1/chat/completions", JSON.stringify(shape))).toBeUndefined();
     const withNull = { ...shape, tools: null };
-    const normalized = JSON.parse(normalizeGatewayOptionalNulls(
-      "/v1/chat/completions", JSON.stringify(withNull),
-    ));
+    const normalized = JSON.parse(normalizeGatewayOptionalNulls("/v1/chat/completions", JSON.stringify(withNull)));
     expect(normalized.metadata).toEqual({});
     expect(normalized.tool_choice).toBeNull();
   });
@@ -54,12 +53,14 @@ describe("provider-neutral Gateway optional-null compatibility", () => {
 
   test("rewritten requests discard stale content-length while retaining auth and method", async () => {
     const request = new Request("http://127.0.0.1/v1/chat/completions", {
-      method: "POST", headers: { authorization: "Bearer dummy" },
+      method: "POST",
+      headers: { authorization: "Bearer dummy" },
       body: JSON.stringify(original),
     });
-    const changed = withBody(request, normalizeGatewayOptionalNulls(
-      "/v1/chat/completions", await request.clone().text(),
-    ));
+    const changed = withBody(
+      request,
+      normalizeGatewayOptionalNulls("/v1/chat/completions", await request.clone().text()),
+    );
     expect(changed.method).toBe("POST");
     expect(changed.headers.get("authorization")).toBe("Bearer dummy");
     expect(changed.headers.has("content-length")).toBe(false);
@@ -71,9 +72,12 @@ describe("provider-neutral Gateway optional-null compatibility", () => {
       async (r) => new Response(await r.text()),
       (text) => normalizeGatewayOptionalNulls("/v1/chat/completions", text),
     );
-    const response = await handler(new Request("http://localhost/v1/chat/completions", {
-      method: "POST", body: JSON.stringify(original),
-    }));
+    const response = await handler(
+      new Request("http://localhost/v1/chat/completions", {
+        method: "POST",
+        body: JSON.stringify(original),
+      }),
+    );
     const returned = await response.json();
     expect(returned).not.toHaveProperty("tools");
     expect(returned).not.toHaveProperty("metadata");

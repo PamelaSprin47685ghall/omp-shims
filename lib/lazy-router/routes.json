@@ -10,9 +10,7 @@
   "routes": {
     "lazy/default": {
       "displayName": "Lazy · default",
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "periods": {
         "peak": [
           {
@@ -63,9 +61,7 @@
     },
     "lazy/task": {
       "displayName": "Lazy · task",
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "periods": {
         "peak": [
           {
@@ -122,10 +118,7 @@
     },
     "lazy/vision": {
       "displayName": "Lazy · vision",
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "derive": {
         "from": "lazy/task",
         "append": [
@@ -142,9 +135,7 @@
     "rush/default": {
       "displayName": "Rush · default",
       "selection": "ordered",
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "periods": {
         "peak": [
           {
@@ -172,13 +163,11 @@
     "rush/task": {
       "displayName": "Rush · task",
       "selection": "ordered",
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "periods": {
         "peak": [
           {
-            "model": "mistral-vibe/deepseek-v4-1-flash-1017",
+            "model": "mistral/deepseek-v4-1-flash-1017",
             "effort": "max",
             "intelligence": 59,
             "cost": 0.04
@@ -206,14 +195,11 @@
     "rush/vision": {
       "displayName": "Rush · vision",
       "selection": "ordered",
-      "input": [
-        "text",
-        "image"
-      ],
+      "input": ["text", "image"],
       "periods": {
         "peak": [
           {
-            "model": "mistral-vibe/zai-glm-5-3-flash",
+            "model": "mistral/zai-glm-5-3-flash",
             "effort": "max",
             "intelligence": 49.5,
             "cost": 0.04
@@ -237,17 +223,12 @@
           }
         ]
       },
-      "require": [
-        "text",
-        "image"
-      ]
+      "require": ["text", "image"]
     },
     "weak/default": {
       "displayName": "Weak · coordinator",
       "selection": "ordered",
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "periods": {
         "peak": [
           {
@@ -274,9 +255,7 @@
       "displayName": "Weak · workers",
       "contextWindow": 250000,
       "maxOutputTokens": 32768,
-      "input": [
-        "text"
-      ],
+      "input": ["text"],
       "periods": {
         "peak": [
           {
@@ -292,7 +271,7 @@
             "cost": 0.01
           },
           {
-            "model": "mistral-vibe/mistral-small-latest",
+            "model": "mistral/mistral-small-latest",
             "effort": "high",
             "intelligence": 35,
             "cost": 0.04
@@ -315,10 +294,7 @@
   "modelTraits": {
     "qoder-cn/qwen3.8-flash": {
       "$comment": "The qoder-cn plugin accepts low/medium but not high; keep routing aligned to the actual endpoint.",
-      "efforts": [
-        "low",
-        "medium"
-      ]
+      "efforts": ["low", "medium"]
     }
   },
   "peakWindows": [

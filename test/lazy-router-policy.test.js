@@ -15,7 +15,7 @@ const ACCOUNTS = [
   { id: 4, provider: "commandcode" },
   { id: 5, provider: "openai-codex", tier: "plus" },
   { id: 6, provider: "openai-codex", tier: "pro" },
-  { id: 7, provider: "mistral-vibe" },
+  { id: 7, provider: "mistral" },
   { id: 8, provider: "charm-hyper" },
   { id: 9, provider: "google-antigravity", tier: "pro" },
   { id: 10, provider: "google-antigravity", tier: "pro" },
@@ -67,7 +67,7 @@ describe("bundled route tables", () => {
     const candidates = policy.candidates("lazy/task", PERIOD.PEAK, units, TEST_NOW).candidates;
     const gemini = candidates.filter((c) => c.model === "google-antigravity/gemini-3.8-flash");
     expect(gemini.map((c) => c.unit.tier)).toEqual(["pro", "pro", "pro"]);
-    expect(candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
+    expect(candidates.some((c) => c.model === "mistral/zai-glm-5-3-flash")).toBe(false);
     expect(candidates.some((c) => c.model === "cline-pass/glm-5.3-flash")).toBe(false);
     expect(candidates.some((c) => c.model === "ollama-cloud/glm-5.3-flash")).toBe(false);
   });
@@ -75,10 +75,16 @@ describe("bundled route tables", () => {
   test("Qoder DeepSeek Flash is a temporary zero-cost-like task candidate through October", () => {
     const active = new Date("2026-10-31T23:59:59+08:00");
     const expired = new Date("2026-11-01T00:00:00+08:00");
-    const live = policy.candidates("lazy/task", PERIOD.PEAK, units, active).candidates.filter((c) => c.model === "qoder-cn/deepseek-v4-flash");
+    const live = policy
+      .candidates("lazy/task", PERIOD.PEAK, units, active)
+      .candidates.filter((c) => c.model === "qoder-cn/deepseek-v4-flash");
     expect(live).toHaveLength(1);
     expect(live[0]).toMatchObject({ effort: "max", intelligence: 59, cost: 0.01 });
-    expect(policy.candidates("lazy/task", PERIOD.PEAK, units, expired).candidates.some((c) => c.model === "qoder-cn/deepseek-v4-flash")).toBe(false);
+    expect(
+      policy
+        .candidates("lazy/task", PERIOD.PEAK, units, expired)
+        .candidates.some((c) => c.model === "qoder-cn/deepseek-v4-flash"),
+    ).toBe(false);
   });
 
   test("rush/default is strict Terra medium: Plus first, then Pro", () => {
@@ -97,10 +103,7 @@ describe("bundled route tables", () => {
       "ollama-cloud ollama-cloud/glm-5.3-flash",
     ];
     expect(policy.selectionOf("rush/task")).toBe("ordered");
-    expect(order("rush/task", PERIOD.PEAK)).toEqual([
-      "mistral-vibe mistral-vibe/deepseek-v4-1-flash-1017",
-      ...backup,
-    ]);
+    expect(order("rush/task", PERIOD.PEAK)).toEqual(["mistral mistral/deepseek-v4-1-flash-1017", ...backup]);
     expect(order("rush/task", PERIOD.OFF_PEAK)).toEqual(order("rush/task", PERIOD.PEAK));
     const task = policy.candidates("rush/task", PERIOD.PEAK, units, TEST_NOW);
     expect(task.candidates[0]).toMatchObject({
@@ -108,10 +111,10 @@ describe("bundled route tables", () => {
       intelligence: 59,
       cost: 0.04,
     });
-    const expectedVision = ["mistral-vibe mistral-vibe/zai-glm-5-3-flash", ...backup];
+    const expectedVision = ["mistral mistral/zai-glm-5-3-flash", ...backup];
     const vision = policy.candidates("rush/vision", PERIOD.PEAK, units, TEST_NOW);
     expect(vision.require).toEqual(["text", "image"]);
-    expect(vision.candidates.map((c) => c.unit.label + " " + c.model)).toEqual(expectedVision);
+    expect(vision.candidates.map((c) => `${c.unit.label} ${c.model}`)).toEqual(expectedVision);
     expect(order("rush/vision", PERIOD.OFF_PEAK)).toEqual(expectedVision);
     expect(vision.candidates.every((c) => c.effort === "max")).toBe(true);
   });
@@ -125,7 +128,7 @@ describe("bundled route tables", () => {
     expect(order("weak/task", PERIOD.PEAK)).toEqual([
       "commandcode commandcode/poolside/laguna-s-2.1-free",
       "commandcode commandcode/stealth/glyph-cluster:free",
-      "mistral-vibe mistral-vibe/mistral-small-latest",
+      "mistral mistral/mistral-small-latest",
       "opencode-go opencode-go/iceman-contributor-free",
     ]);
     expect(policy.routeFor("weak/vision")).toBeUndefined();
@@ -139,12 +142,25 @@ describe("bundled route tables", () => {
     const task = policy.candidates("lazy/task", PERIOD.PEAK, units, TEST_NOW).candidates;
     expect(require).toEqual(["text", "image"]);
     expect(candidates.slice(0, task.length)).toEqual(task);
-    expect(candidates.at(-1)).toMatchObject({ model: "google-antigravity/gemini-4-argon", intelligence: 63.1, effort: "medium" });
+    expect(candidates.at(-1)).toMatchObject({
+      model: "google-antigravity/gemini-4-argon",
+      intelligence: 63.1,
+      effort: "medium",
+    });
     expect(candidates.at(-1).unit.tier).toBe("ultra");
   });
 
   test("routeFor accepts all configured virtual families and rejects direct/unknown ids", () => {
-    for (const id of ["lazy/default", "lazy/task", "lazy/vision", "rush/default", "rush/task", "rush/vision", "weak/default", "weak/task"]) {
+    for (const id of [
+      "lazy/default",
+      "lazy/task",
+      "lazy/vision",
+      "rush/default",
+      "rush/task",
+      "rush/vision",
+      "weak/default",
+      "weak/task",
+    ]) {
       expect(policy.routeFor(id)).toBe(id);
       expect(policy.modelIdOf(id)).toBe(id);
     }
@@ -251,7 +267,11 @@ describe("validation", () => {
   });
 
   test("route-level context and output limits must be positive integers", () => {
-    for (const [field, value] of [["contextWindow", 0], ["contextWindow", 1.5], ["maxOutputTokens", -1]]) {
+    for (const [field, value] of [
+      ["contextWindow", 0],
+      ["contextWindow", 1.5],
+      ["maxOutputTokens", -1],
+    ]) {
       const data = base();
       data.routes.r[field] = value;
       expect(() => new RoutePolicy(data)).toThrow(new RegExp(field));

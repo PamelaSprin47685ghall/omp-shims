@@ -5,8 +5,8 @@
   "maxInFlight": {
     "ollama-cloud": 3,
     "charm-hyper": 2,
-    "mistral-vibe/deepseek-v4-1-flash-1017": 60,
-    "mistral-vibe/zai-glm-5-3-flash": 60
+    "mistral/deepseek-v4-1-flash-1017": 60,
+    "mistral/zai-glm-5-3-flash": 60
   },
   "routes": {
     "lazy/pro": {
@@ -51,7 +51,7 @@
       "maxOutputTokens": 32768,
       "graph": {
         "type": "model",
-        "model": "mistral-vibe/mistral-small-latest",
+        "model": "mistral/mistral-small-latest",
         "effort": "high"
       }
     },
@@ -87,7 +87,7 @@
         "children": [
           {
             "type": "model",
-            "model": "mistral-vibe/deepseek-v4-1-flash-1017",
+            "model": "mistral/deepseek-v4-1-flash-1017",
             "effort": "max"
           },
           {

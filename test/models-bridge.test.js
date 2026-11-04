@@ -5,7 +5,6 @@ import {
   extractCustomProviders,
   findModelsPath,
   install,
-  loadModelsConfig,
   parseYaml,
   resolveApiKey,
 } from "../features/models-bridge.js";
@@ -182,7 +181,7 @@ providers:
 
     const registered = [];
     const configKeys = new Map();
-    let snapshotCalls = 0;
+    let _snapshotCalls = 0;
 
     class FakeModelRegistry {
       constructor() {
@@ -192,7 +191,7 @@ providers:
           },
           credentials: {
             snapshot: () => {
-              snapshotCalls++;
+              _snapshotCalls++;
               return {
                 generation: 1,
                 generatedAt: Date.now(),
@@ -257,7 +256,7 @@ providers:
         "    apiKey: local-proxy-token",
         "    api: openai-completions",
         "    models:",
-        "      - id: mistral-vibe/zai-glm-5-3-flash",
+        "      - id: mistral/zai-glm-5-3-flash",
         "  external-proxy:",
         "    baseUrl: https://external.example/v1",
         "    apiKey: external-token",
@@ -277,9 +276,13 @@ providers:
           credentials: { snapshot: () => ({ generation: 1, generatedAt: Date.now(), credentials: [] }) },
         };
       }
-      registerProvider(name) { registered.push(name); }
+      registerProvider(name) {
+        registered.push(name);
+      }
       async refresh() {}
-      getAll() { return []; }
+      getAll() {
+        return [];
+      }
     }
     globalThis.__OMP_SHIMS_HOST__ = {
       captured: new Map([["ModelRegistry", FakeModelRegistry]]),
@@ -293,7 +296,9 @@ providers:
     expect(registered).toEqual(["external-proxy"]);
     expect(configKeys.has("kw92.cyou")).toBe(false);
     expect(configKeys.get("external-proxy")).toBe("external-token");
-    expect(registry.authStorage.credentials.snapshot().credentials.map((entry) => entry.provider)).toEqual(["external-proxy"]);
+    expect(registry.authStorage.credentials.snapshot().credentials.map((entry) => entry.provider)).toEqual([
+      "external-proxy",
+    ]);
     expect(lines.some((line) => line.includes("skipped local provider kw92.cyou"))).toBe(true);
   });
 

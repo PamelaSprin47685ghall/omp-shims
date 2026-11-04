@@ -1,18 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ComposedPolicy, isDeepSeekPeak, isOllamaPeak, isCommandCodePeak } from "../lib/lazy-router/composed-policy.js";
-import { CyclicSpeed, periodicBasis } from "../lib/lazy-router/cyclic-speed.js";
+import { join } from "node:path";
 import { InFlightTracker } from "../lib/lazy-router/capacity.js";
+import { ComposedPolicy, isCommandCodePeak, isDeepSeekPeak, isOllamaPeak } from "../lib/lazy-router/composed-policy.js";
+import { CyclicSpeed, periodicBasis } from "../lib/lazy-router/cyclic-speed.js";
 
 const when = (s) => new Date(s);
 const accounts = [
   { provider: "openai-codex", tier: "plus", key: "plus1", label: "plus1" },
   { provider: "openai-codex", tier: "plus", key: "plus2", label: "plus2" },
   { provider: "openai-codex", tier: "pro", key: "pro1", label: "pro1" },
-  { provider: "mistral-vibe", key: "m1", label: "m1" },
-  { provider: "mistral-vibe", key: "m2", label: "m2" },
+  { provider: "mistral", key: "m1", label: "m1" },
+  { provider: "mistral", key: "m2", label: "m2" },
   { provider: "kiro", key: "k1", label: "kiro" },
   { provider: "google-antigravity", tier: "ultra", key: "u1", label: "ultra" },
   { provider: "google-antigravity", tier: "pro", key: "g1", label: "pro" },
@@ -24,32 +24,49 @@ const accounts = [
   { provider: "commandcode", key: "command", label: "command" },
   { provider: "openai-api", key: "api1", label: "openai-api" },
 ];
-const units = { select(provider, tiers) { return accounts.filter((a) => a.provider === provider && (!tiers || tiers.includes(a.tier))); } };
+const units = {
+  select(provider, tiers) {
+    return accounts.filter((a) => a.provider === provider && (!tiers || tiers.includes(a.tier)));
+  },
+};
 const policy = new ComposedPolicy();
 
 function ranked(route, at, options = {}) {
   const candidates = policy.candidates(route, "peak", units, at).candidates;
-  return policy.rankCandidates(route, candidates, {
-    at,
-    random: () => 0.5,
-    speed: { predict(model) { return { totalMs: model.includes("argon") ? 1000 : 10000, rd: 0.1, weight: 100 }; } },
-    ...options,
-  }).map((r) => r.candidate);
+  return policy
+    .rankCandidates(route, candidates, {
+      at,
+      random: () => 0.5,
+      speed: {
+        predict(model) {
+          return { totalMs: model.includes("argon") ? 1000 : 10000, rd: 0.1, weight: 100 };
+        },
+      },
+      ...options,
+    })
+    .map((r) => r.candidate);
 }
 
 describe("recursive keyed-model algebra", () => {
   test("only four Lazy routes exist after batch-blind retirement", () => {
-    expect(policy.routeNames).toEqual([
-      "lazy/pro", "lazy/weak", "lazy/default", "lazy/task",
-    ]);
+    expect(policy.routeNames).toEqual(["lazy/pro", "lazy/weak", "lazy/default", "lazy/task"]);
     expect(policy.routeFor("lazy/batch-blind")).toBeUndefined();
-    for (const name of ["weak/task", "rush/default", "rush/task", "rush/vision", "lazy/vision", "weak/default", "lazy/flash"]) expect(policy.routeFor(name)).toBeUndefined();
+    for (const name of [
+      "weak/task",
+      "rush/default",
+      "rush/task",
+      "rush/vision",
+      "lazy/vision",
+      "weak/default",
+      "lazy/flash",
+    ])
+      expect(policy.routeFor(name)).toBeUndefined();
   });
 
   test("Codex Plus remains ahead of Codex Pro inside its fallback branch", () => {
     const at = when("2026-10-29T12:00:00Z");
-    const codex = (options) => ranked("lazy/default", at, options)
-      .filter((c) => c.model === "openai-codex/gpt-6.1-terra");
+    const codex = (options) =>
+      ranked("lazy/default", at, options).filter((c) => c.model === "openai-codex/gpt-6.1-terra");
     expect(codex().map((c) => c.unit.tier)).toEqual(["plus", "plus", "pro"]);
     expect(codex({ available: (c) => c.unit.key !== "plus1" }).map((c) => c.unit.key)).toEqual(["plus2", "pro1"]);
     expect(codex({ available: (c) => c.unit.tier !== "plus" }).map((c) => c.unit.key)).toEqual(["pro1"]);
@@ -75,10 +92,11 @@ describe("recursive keyed-model algebra", () => {
       ["openai-api/gpt-6.1-terra", null],
     ]);
     const fastestFlex = choice({
-      speed: { predict(model) {
-        return { totalMs: model === "openai-api/gpt-6.1-terra" ? 1 : 100000,
-          rd: 0.1, weight: 100 };
-      } },
+      speed: {
+        predict(model) {
+          return { totalMs: model === "openai-api/gpt-6.1-terra" ? 1 : 100000, rd: 0.1, weight: 100 };
+        },
+      },
     });
     expect(fastestFlex.at(-1).model).toBe("openai-api/gpt-6.1-terra");
     expect(fastestFlex[0].unit.tier).toBe("plus");
@@ -92,12 +110,12 @@ describe("recursive keyed-model algebra", () => {
   });
 
   test("Mistral DeepSeek has 60 concurrent slots per Key, not shared", () => {
-    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
-    const key1 = { provider: "mistral-vibe", key: "mistral-vibe/31", label: "mistral-vibe#1" };
-    const key2 = { provider: "mistral-vibe", key: "mistral-vibe/42", label: "mistral-vibe#2" };
+    const model = "mistral/deepseek-v4-1-flash-1017";
+    const key1 = { provider: "mistral", key: "mistral/31", label: "mistral#1" };
+    const key2 = { provider: "mistral", key: "mistral/42", label: "mistral#2" };
     const first = policy.capacityUnit({ unit: key1, model });
     const second = policy.capacityUnit({ unit: key2, model });
-    const small = policy.capacityUnit({ unit: key1, model: "mistral-vibe/mistral-small-latest" });
+    const small = policy.capacityUnit({ unit: key1, model: "mistral/mistral-small-latest" });
     const tracker = new InFlightTracker({ limitOf: (unit) => policy.maxInFlight(unit) });
     expect(policy.maxInFlight(first)).toBe(60);
     expect(policy.maxInFlight(second)).toBe(60);
@@ -119,7 +137,9 @@ describe("recursive keyed-model algebra", () => {
     held[0].releaseAll();
     expect(tracker.inFlight(first)).toBe(59);
     expect(tracker.hasRoom(first)).toBe(true);
-    held.forEach((slot) => slot.releaseAll());
+    held.forEach((slot) => {
+      slot.releaseAll();
+    });
     otherKey.releaseAll();
     expect(tracker.inFlight(first)).toBe(0);
     expect(tracker.inFlight(second)).toBe(0);
@@ -127,9 +147,14 @@ describe("recursive keyed-model algebra", () => {
 
   test("multiple Mistral keys receive one shared speed prediction", () => {
     const at = when("2026-10-29T12:00:00Z");
-    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const model = "mistral/deepseek-v4-1-flash-1017";
     const calls = [];
-    const speed = { predict(name) { calls.push(name); return { totalMs: 2300, rd: 0.2, weight: 90 }; } };
+    const speed = {
+      predict(name) {
+        calls.push(name);
+        return { totalMs: 2300, rd: 0.2, weight: 90 };
+      },
+    };
     const result = ranked("lazy/task", at, { speed });
     expect(result.filter((c) => c.model === model)).toHaveLength(2);
     expect(ranked("lazy/task", at, { speed }).filter((c) => c.model === model)).toHaveLength(2);
@@ -142,8 +167,8 @@ describe("recursive keyed-model algebra", () => {
     const at = when("2026-10-29T12:00:00Z");
     const warm = ranked("lazy/task", at, {
       random: () => 0.8,
-      cachedShare: (c) => c.unit.key === "m1" ? 0.5 : 0,
-      cachedBytes: (c) => c.unit.key === "m1" ? 65536 : 0,
+      cachedShare: (c) => (c.unit.key === "m1" ? 0.5 : 0),
+      cachedBytes: (c) => (c.unit.key === "m1" ? 65536 : 0),
       settings: { temperature: 0.6 },
     });
     expect(warm[0].unit.key).toBe("m1");
@@ -151,17 +176,21 @@ describe("recursive keyed-model algebra", () => {
 
   test("Argon uses one rated slot: Ultra first, Pro only after Ultra is unavailable", () => {
     const at = when("2026-10-29T12:00:00Z");
-    const row = (available) => ranked("lazy/pro", at, {
-      settings: { temperature: 0 }, available,
-    }).filter((candidate) => candidate.model === "google-antigravity/gemini-4-argon");
+    const row = (available) =>
+      ranked("lazy/pro", at, {
+        settings: { temperature: 0 },
+        available,
+      }).filter((candidate) => candidate.model === "google-antigravity/gemini-4-argon");
     expect(row(() => true).map((candidate) => candidate.unit.tier)).toEqual(["ultra", "pro"]);
-    expect(row((candidate) => candidate.unit.tier !== "ultra").map((candidate) => candidate.unit.tier)).toEqual(["pro"]);
+    expect(row((candidate) => candidate.unit.tier !== "ultra").map((candidate) => candidate.unit.tier)).toEqual([
+      "pro",
+    ]);
     const raw = policy.candidates("lazy/pro", "peak", units, at).candidates;
     expect(raw.filter((c) => c.model === "google-antigravity/gemini-4-argon")).toHaveLength(2);
   });
 
   test("Lazy Task uses Mistral DeepSeek in place of GLM, alongside five other DeepSeek channels", () => {
-    const mistralDeepSeek = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const mistralDeepSeek = "mistral/deepseek-v4-1-flash-1017";
     const deepseek = [
       "charm-hyper/deepseek-v4.1-flash-1017",
       "opencode-go/deepseek-v4.1-flash",
@@ -172,35 +201,45 @@ describe("recursive keyed-model algebra", () => {
     ];
     const at = when("2026-10-31T14:00:00Z");
     const candidates = policy.candidates("lazy/task", "peak", units, at).candidates;
-    expect(candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
+    expect(candidates.some((c) => c.model === "mistral/zai-glm-5-3-flash")).toBe(false);
     expect(candidates.filter((c) => c.model === mistralDeepSeek)).toHaveLength(2);
     expect(new Set(candidates.map((c) => c.model))).toEqual(new Set([mistralDeepSeek, ...deepseek]));
     const topology = policy.routeTopology()["lazy/task"].graph;
     expect(topology.type).toBe("rating");
     expect(topology.children.map((c) => c.model)).toEqual([mistralDeepSeek, ...deepseek]);
-    expect(topology.children[0]).toEqual({ type: "model", model: mistralDeepSeek,
-      tier: null, effort: "max", offPeakOnly: null });
-    // Neither model is forced ahead. The same scoring mechanism may pick either.
-    const fast = (fastModel) => ranked("lazy/task", at, {
-      random: () => 0.5,
-      speed: { predict(model) {
-        return { totalMs: model === fastModel ? 10 : 100000, rd: 0.1, weight: 100 };
-      } },
+    expect(topology.children[0]).toEqual({
+      type: "model",
+      model: mistralDeepSeek,
+      tier: null,
+      effort: "max",
+      offPeakOnly: null,
     });
+    // Neither model is forced ahead. The same scoring mechanism may pick either.
+    const fast = (fastModel) =>
+      ranked("lazy/task", at, {
+        random: () => 0.5,
+        speed: {
+          predict(model) {
+            return { totalMs: model === fastModel ? 10 : 100000, rd: 0.1, weight: 100 };
+          },
+        },
+      });
     expect(fast(mistralDeepSeek)[0].model).toBe(mistralDeepSeek);
     expect(fast(deepseek[0])[0].model).toBe(deepseek[0]);
     expect(fast(deepseek.at(-1))[0].model).toBe(deepseek.at(-1));
     // Command Code's real V4.1-Flash model, added after all existing channels.
-    expect(topology.children.at(-1)).toEqual({ type: "model",
+    expect(topology.children.at(-1)).toEqual({
+      type: "model",
       model: "commandcode/deepseek/deepseek-v4.1-flash",
-      tier: null, effort: "max", offPeakOnly: "commandcode" });
-    const activePeak = policy.candidates("lazy/task", "peak", units,
-      when("2026-10-29T02:00:00Z")).candidates;
+      tier: null,
+      effort: "max",
+      offPeakOnly: "commandcode",
+    });
+    const activePeak = policy.candidates("lazy/task", "peak", units, when("2026-10-29T02:00:00Z")).candidates;
     expect(activePeak.some((c) => c.model === deepseek[1])).toBe(false);
     expect(activePeak.some((c) => c.model === "commandcode/deepseek/deepseek-v4.1-flash")).toBe(false);
     expect(activePeak.some((c) => c.model === "ctyun/deepseek-v4.1-flash")).toBe(true);
-    const ollamaPeak = policy.candidates("lazy/task", "peak", units,
-      when("2026-10-29T14:00:00Z")).candidates;
+    const ollamaPeak = policy.candidates("lazy/task", "peak", units, when("2026-10-29T14:00:00Z")).candidates;
     expect(ollamaPeak.some((c) => c.model === deepseek[2])).toBe(false);
     expect(ollamaPeak.some((c) => c.model === "ctyun/deepseek-v4.1-flash")).toBe(true);
   });
@@ -218,8 +257,8 @@ describe("recursive keyed-model algebra", () => {
     const configured = policy.routeTopology()["lazy/task"].graph.children;
     expect(configured.find((c) => c.model === cline)?.offPeakOnly).toBe("deepseek");
     expect(configured.find((c) => c.model === ollama)?.offPeakOnly).toBe("ollama");
-    const eligible = (at) => new Set(
-      policy.candidates("lazy/task", "peak", units, when(at)).candidates.map((c) => c.model));
+    const eligible = (at) =>
+      new Set(policy.candidates("lazy/task", "peak", units, when(at)).candidates.map((c) => c.model));
     const dsPeak = eligible("2026-10-29T02:00:00Z"); // DeepSeek peak, Ollama off-peak
     expect(dsPeak.has(cline)).toBe(false);
     expect(dsPeak.has(opencode)).toBe(false);
@@ -231,8 +270,9 @@ describe("recursive keyed-model algebra", () => {
     const holiday = new ComposedPolicy(undefined, {
       calendar: { days: new Map([["2026-10-29", { kind: "holiday" }]]) },
     });
-    const holidaySet = new Set(holiday.candidates("lazy/task", "peak", units,
-      when("2026-10-29T02:00:00Z")).candidates.map((c) => c.model));
+    const holidaySet = new Set(
+      holiday.candidates("lazy/task", "peak", units, when("2026-10-29T02:00:00Z")).candidates.map((c) => c.model),
+    );
     expect(holidaySet.has(cline)).toBe(true);
     expect(holidaySet.has(opencode)).toBe(true);
     // Command Code applies weekday peak hours even on Chinese public holidays.
@@ -249,12 +289,10 @@ describe("recursive keyed-model algebra", () => {
     const holiday = new ComposedPolicy(undefined, {
       calendar: { days: new Map([["2026-10-29", { kind: "holiday" }]]) },
     });
-    const peak=holiday.candidates("lazy/task", "peak", units,
-      when("2026-10-29T02:00:00Z")).candidates;
-    expect(peak.some(c => c.model === "commandcode/deepseek/deepseek-v4.1-flash")).toBe(false);
-    const weekend=policy.candidates("lazy/task", "offpeak", units,
-      when("2026-10-31T02:00:00Z")).candidates;
-    expect(weekend.some(c => c.model === "commandcode/deepseek/deepseek-v4.1-flash")).toBe(true);
+    const peak = holiday.candidates("lazy/task", "peak", units, when("2026-10-29T02:00:00Z")).candidates;
+    expect(peak.some((c) => c.model === "commandcode/deepseek/deepseek-v4.1-flash")).toBe(false);
+    const weekend = policy.candidates("lazy/task", "offpeak", units, when("2026-10-31T02:00:00Z")).candidates;
+    expect(weekend.some((c) => c.model === "commandcode/deepseek/deepseek-v4.1-flash")).toBe(true);
   });
 
   test("DeepSeek and Ollama peak windows differ and are end-exclusive", () => {
@@ -274,18 +312,21 @@ describe("recursive keyed-model algebra", () => {
     for (const randomValue of [0, 0.2, 0.5, 0.8, 0.999]) {
       const warm = ranked("lazy/task", at, {
         random: () => randomValue,
-        cachedShare: (c) => c.unit.key === "m2" ? 0.5 : 0,
-        cachedBytes: (c) => c.unit.key === "m2" ? 30000 : 0,
+        cachedShare: (c) => (c.unit.key === "m2" ? 0.5 : 0),
+        cachedBytes: (c) => (c.unit.key === "m2" ? 30000 : 0),
       });
-      const deepSeekKeys = warm.filter((c) => c.model === "mistral-vibe/deepseek-v4-1-flash-1017");
+      const deepSeekKeys = warm.filter((c) => c.model === "mistral/deepseek-v4-1-flash-1017");
       expect(deepSeekKeys.map((c) => c.unit.key)).toEqual(["m2", "m1"]);
     }
     // When the warm account fails, the other account remains available.
-    expect(ranked("lazy/task", at, {
-      available: (c) => c.unit.key !== "m2",
-      cachedBytes: (c) => c.unit.key === "m2" ? 30000 : 0,
-    }).filter((c) => c.model === "mistral-vibe/deepseek-v4-1-flash-1017")
-      .map((c) => c.unit.key)).toEqual(["m1"]);
+    expect(
+      ranked("lazy/task", at, {
+        available: (c) => c.unit.key !== "m2",
+        cachedBytes: (c) => (c.unit.key === "m2" ? 30000 : 0),
+      })
+        .filter((c) => c.model === "mistral/deepseek-v4-1-flash-1017")
+        .map((c) => c.unit.key),
+    ).toEqual(["m1"]);
   });
 
   test("topology exposes nested rating, fallback and model leaves", () => {
@@ -307,31 +348,43 @@ describe("recursive keyed-model algebra", () => {
 
 describe("Rating uses temperature-softmax of log total completion time", () => {
   const at = when("2026-10-29T12:00:00Z");
-  const two = new ComposedPolicy({ routes: {
-    pair: { graph: { type: "rating", children: [
-      { type: "model", model: "kiro/claude-opus-5-5" },
-      { type: "model", model: "ctyun/deepseek-v4.1-flash" },
-    ] } },
-  } });
+  const two = new ComposedPolicy({
+    routes: {
+      pair: {
+        graph: {
+          type: "rating",
+          children: [
+            { type: "model", model: "kiro/claude-opus-5-5" },
+            { type: "model", model: "ctyun/deepseek-v4.1-flash" },
+          ],
+        },
+      },
+    },
+  });
   const candidates = two.candidates("pair", "peak", units, at).candidates;
   const seededRandom = (seed) => {
     let state = seed >>> 0;
     return () => {
-      state = (state + 0x6D2B79F5) >>> 0;
-      let value = Math.imul(state ^ state >>> 15, 1 | state);
-      value ^= value + Math.imul(value ^ value >>> 7, 61 | value);
-      return ((value ^ value >>> 14) >>> 0) / 4294967296;
+      state = (state + 0x6d2b79f5) >>> 0;
+      let value = Math.imul(state ^ (state >>> 15), 1 | state);
+      value ^= value + Math.imul(value ^ (value >>> 7), 61 | value);
+      return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
     };
   };
   const sample = (fastMs, slowMs, temp, rd = 0, draws = 5000) => {
     const random = seededRandom(3297);
     const counts = [0, 0];
-    const speed = { predict(model) {
-      return { totalMs: model.startsWith("kiro/") ? fastMs : slowMs, rd, weight: 100 };
-    } };
+    const speed = {
+      predict(model) {
+        return { totalMs: model.startsWith("kiro/") ? fastMs : slowMs, rd, weight: 100 };
+      },
+    };
     for (let i = 0; i < draws; i++) {
       const result = two.rankCandidates("pair", candidates, {
-        at, random, speed, settings: { temperature: temp },
+        at,
+        random,
+        speed,
+        settings: { temperature: temp },
       });
       counts[result[0].candidate.model.startsWith("kiro/") ? 0 : 1]++;
     }
@@ -341,7 +394,7 @@ describe("Rating uses temperature-softmax of log total completion time", () => {
   test("nearly equal speeds receive nearly equal traffic, not near-deterministic preference", () => {
     const fastShare = sample(10000, 10300, 0.6);
     // Theoretical softmax share = 1 / (1 + (10000/10300) ** (1/0.6)).
-    const theoretical = 1 / (1 + Math.pow(10000 / 10300, 1 / 0.6));
+    const theoretical = 1 / (1 + (10000 / 10300) ** (1 / 0.6));
     expect(fastShare).toBeGreaterThan(0.48);
     expect(fastShare).toBeLessThan(0.56);
     expect(Math.abs(fastShare - theoretical)).toBeLessThan(0.035);
@@ -358,7 +411,7 @@ describe("Rating uses temperature-softmax of log total completion time", () => {
     const hot = sample(1000, 2000, 4);
     expect(cold).toBeGreaterThan(0.99);
     expect(hot).toBeGreaterThan(0.49);
-    expect(hot).toBeLessThan(0.60);
+    expect(hot).toBeLessThan(0.6);
     expect(sample(10000, 10300, 0, 1.25, 100)).toBe(1);
   });
 
@@ -372,18 +425,19 @@ describe("Rating uses temperature-softmax of log total completion time", () => {
 
   test("one unavailable model is removed before drawing and fallback order is unchanged", () => {
     const onlySlow = two.rankCandidates("pair", candidates, {
-      at, random: seededRandom(10),
+      at,
+      random: seededRandom(10),
       available: (c) => c.unit.provider === "ctyun",
       settings: { temperature: 2 },
     });
-    expect(onlySlow.map(x => x.candidate.unit.provider)).toEqual(["ctyun"]);
+    expect(onlySlow.map((x) => x.candidate.unit.provider)).toEqual(["ctyun"]);
     const fallback = policy.candidates("lazy/default", "peak", units, at).candidates;
     const winner = policy.rankCandidates("lazy/default", fallback, {
-      at, random: seededRandom(10), settings: { temperature: 100 },
+      at,
+      random: seededRandom(10),
+      settings: { temperature: 100 },
     });
-    expect(winner.map(x => x.candidate.unit.tier ?? "flex")).toEqual([
-      "plus", "plus", "pro", "flex",
-    ]);
+    expect(winner.map((x) => x.candidate.unit.tier ?? "flex")).toEqual(["plus", "plus", "pro", "flex"]);
   });
 });
 
@@ -409,7 +463,7 @@ describe("periodic cubic B-spline sufficient statistics", () => {
   });
 
   test("hourly RD remains uncertain away from the observed UTC hour", () => {
-    let now = Date.UTC(2026, 9, 29, 6);
+    const now = Date.UTC(2026, 9, 29, 6);
     const speed = new CyclicSpeed({ now: () => now });
     for (let i = 0; i < 200; i++) speed.observe("a/model", 950);
     const seenHour = speed.predict("a/model", now);
@@ -432,7 +486,7 @@ describe("periodic cubic B-spline sufficient statistics", () => {
   });
 
   test("censored slow requests raise expected time without being counted as successes", () => {
-    let now = Date.UTC(2026, 9, 29, 6);
+    const now = Date.UTC(2026, 9, 29, 6);
     const speed = new CyclicSpeed({ now: () => now });
     for (let i = 0; i < 80; i++) speed.observe("a/model", 1200);
     const before = speed.predict("a/model", now).totalMs;
@@ -446,7 +500,7 @@ describe("periodic cubic B-spline sufficient statistics", () => {
   test("state persists only bounded regression sums and can be reloaded", () => {
     const dir = mkdtempSync(join(tmpdir(), "lazy-cyclic-"));
     try {
-      let now = Date.UTC(2026, 9, 29, 6);
+      const now = Date.UTC(2026, 9, 29, 6);
       const path = join(dir, "speed.json");
       const first = new CyclicSpeed({ now: () => now, statePath: path });
       first.observe("a/model", 1400);
@@ -455,29 +509,51 @@ describe("periodic cubic B-spline sufficient statistics", () => {
       const second = new CyclicSpeed({ now: () => now, statePath: path });
       expect(second.predict("a/model", now).weight).toBeCloseTo(first.predict("a/model", now).weight, 6);
       expect(second.models.get("a/model").gram).toHaveLength(24);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
 test("nested fallback, random, and rating compose without special route handlers", () => {
-  const nested = new ComposedPolicy({ routes: {
-    "nested/test": { graph: { type: "fallback", children: [
-      { type: "random", children: [
-        { type: "rating", children: [
-          { type: "model", model: "kiro/claude-opus-5-5" },
-          { type: "model", model: "google-antigravity/gemini-4-argon", tier: "ultra" },
-        ] },
-        { type: "model", model: "mistral-vibe/mistral-small-latest" },
-      ] },
-      { type: "model", model: "ctyun/glm-5.3-oc" },
-    ] } },
-  } });
+  const nested = new ComposedPolicy({
+    routes: {
+      "nested/test": {
+        graph: {
+          type: "fallback",
+          children: [
+            {
+              type: "random",
+              children: [
+                {
+                  type: "rating",
+                  children: [
+                    { type: "model", model: "kiro/claude-opus-5-5" },
+                    { type: "model", model: "google-antigravity/gemini-4-argon", tier: "ultra" },
+                  ],
+                },
+                { type: "model", model: "mistral/mistral-small-latest" },
+              ],
+            },
+            { type: "model", model: "ctyun/glm-5.3-oc" },
+          ],
+        },
+      },
+    },
+  });
   const time = when("2026-10-29T12:00:00Z");
   const pool = nested.candidates("nested/test", "peak", units, time).candidates;
-  const result = nested.rankCandidates("nested/test", pool, {
-    at: time, random: () => 0.4,
-    speed: { predict() { return { totalMs: 1200, rd: 0.5, weight: 5 }; } },
-  }).map(({candidate}) => candidate.model);
+  const result = nested
+    .rankCandidates("nested/test", pool, {
+      at: time,
+      random: () => 0.4,
+      speed: {
+        predict() {
+          return { totalMs: 1200, rd: 0.5, weight: 5 };
+        },
+      },
+    })
+    .map(({ candidate }) => candidate.model);
   expect(result).toHaveLength(5);
   expect(result.at(-1)).toBe("ctyun/glm-5.3-oc");
 });

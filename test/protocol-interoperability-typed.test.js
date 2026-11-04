@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { restoreToolIds, rewriteToolIds } from "../features/tool-id-hash.js";
-import { reasoningEffortOf } from "../lib/lazy-router/mistral-native-fallback.js";
 import { convertChatJson, convertChatResponse, requestAsChat } from "../lib/lazy-router/protocol-interoperability.js";
 import { chatAsResponses, responsesAsChat, responsesSseAsChat } from "../lib/lazy-router/responses-wire.js";
-import { isMistralChatCompletion } from "../lib/mistral-vibe-provider.js";
 
 const CHAT = {
   id: "chatcmpl-1",
@@ -221,27 +219,6 @@ describe("Responses wire preserves reasoning in both directions", () => {
     );
     const text = await responsesSseAsChat(source, "m").text();
     expect(text).toContain('"reasoning_content":"plan"');
-  });
-});
-
-describe("Mistral effort from OMP parsed options", () => {
-  test("reads the real typed-parser shapes", () => {
-    expect(reasoningEffortOf({ reasoning: "high" })).toBe("high");
-    expect(reasoningEffortOf({ reasoning: { effort: "low" } })).toBe("low");
-    expect(reasoningEffortOf({ reasoningEffort: "max" })).toBe("max");
-    expect(reasoningEffortOf({ explicitThinkingBudgetTokens: 1024 })).toBe("high");
-    expect(reasoningEffortOf({ disableReasoning: true, reasoning: "high" })).toBe("none");
-    expect(reasoningEffortOf({})).toBeUndefined();
-  });
-});
-
-describe("Mistral response adapter survives the IPv6 rewrite", () => {
-  test("uses the Host header when the URL is an address literal", () => {
-    const literal = "https://[2606:4700:7::2c3]/v1/chat/completions";
-    expect(isMistralChatCompletion(literal, "api.mistral.ai")).toBe(true);
-    expect(isMistralChatCompletion(literal, "api.mistral.ai:443")).toBe(true);
-    expect(isMistralChatCompletion(literal, "evil.example")).toBe(false);
-    expect(isMistralChatCompletion("https://api.mistral.ai/v1/chat/completions")).toBe(true);
   });
 });
 

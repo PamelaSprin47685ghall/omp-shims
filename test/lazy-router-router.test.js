@@ -54,15 +54,15 @@ const CATALOG = {
     canDisable: false,
     baseUrl: "https://ctyun.example/v1",
   },
-  "mistral-vibe/deepseek-v4-1-flash-1017": {
-    ref: "mistral-vibe/deepseek-v4-1-flash-1017",
-    provider: "mistral-vibe",
+  "mistral/deepseek-v4-1-flash-1017": {
+    ref: "mistral/deepseek-v4-1-flash-1017",
+    provider: "mistral",
     contextWindow: 1_000_000,
     input: ["text"],
     reasoning: false,
     efforts: [],
     canDisable: false,
-    baseUrl: "https://mistral-vibe.example/v1",
+    baseUrl: "https://mistral.example/v1",
   },
   "p/quarter": {
     ref: "p/quarter",
@@ -91,8 +91,7 @@ const CATALOG = {
  * real attempt layer, and answers like the auth-gateway does (502 on upstream
  * errors; a 200 event stream opened before upstream answers when streaming).
  */
-function harness({ upstream, faults = {}, bypass, policy = POLICY,
-  clientModel = "lazy/default" }) {
+function harness({ upstream, faults = {}, bypass, policy = POLICY, clientModel = "lazy/default" }) {
   const events = [];
   const emit = (event, detail = {}) => events.push({ event, ...detail });
   const timers = [];
@@ -258,26 +257,30 @@ describe("LazyRouter", () => {
   });
 
   test("Mistral temporary 429 does not probe immediately; 30s background probe restores it", async () => {
-    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const model = "mistral/deepseek-v4-1-flash-1017";
     const custom = {
       ...POLICY,
-      routes: { default: {
-        selection: "ordered",
-        input: ["text"],
-        periods: { peak: [{ model }, { model: "q/text" }] },
-      } },
+      routes: {
+        default: {
+          selection: "ordered",
+          input: ["text"],
+          periods: { peak: [{ model }, { model: "q/text" }] },
+        },
+      },
     };
     let throttled = true;
-    const h = harness({ policy: custom, upstream: (call) =>
-      call.unit === "mistral-vibe" && throttled
-        ? new Response('{"error":"Too Many Requests"}', { status: 429 })
-        : ok(),
+    const h = harness({
+      policy: custom,
+      upstream: (call) =>
+        call.unit === "mistral" && throttled
+          ? new Response('{"error":"Too Many Requests","retry-after":5}', { status: 429 })
+          : ok(),
     });
     const first = await h.send({});
     expect(first.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
-    expect(h.calls.map((c) => c.unit)).toEqual(["mistral-vibe", "q"]);
+    expect(h.calls.map((c) => c.unit)).toEqual(["mistral", "q"]);
     expect(h.names()).not.toContain("probe");
-    const cooled = h.health.entry("mistral-vibe " + model);
+    const cooled = h.health.entry(`mistral ${model}`);
     expect(cooled).toBeDefined();
     expect(cooled.reason).toContain("throttle:");
     expect(cooled.probeIntervalMs).toBe(30_000);
@@ -285,37 +288,45 @@ describe("LazyRouter", () => {
 
     throttled = false;
     await h.timers[0]();
-    expect(h.health.isAlive("mistral-vibe " + model)).toBe(true);
+    expect(h.health.isAlive(`mistral ${model}`)).toBe(true);
     const restored = await h.send({});
     expect(restored.headers.get(SERVED_BY_HEADERS.model)).toBe(model);
     expect(h.names()).toContain("cooldown-exit");
   });
 
   test("Mistral upstream 503 cools 30 seconds, skips immediate probe, then restores", async () => {
-    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
-    const custom = { ...POLICY, routes: { default: {
-      selection: "ordered", input: ["text"],
-      periods: { peak: [{ model }, { model: "q/text" }] },
-    } } };
+    const model = "mistral/deepseek-v4-1-flash-1017";
+    const custom = {
+      ...POLICY,
+      routes: {
+        default: {
+          selection: "ordered",
+          input: ["text"],
+          periods: { peak: [{ model }, { model: "q/text" }] },
+        },
+      },
+    };
     let unavailable = true;
-    const h = harness({ policy: custom, upstream: (call) =>
-      call.unit === "mistral-vibe" && unavailable
-        ? new Response('{"error":"Service Unavailable"}', { status: 503 })
-        : ok(),
+    const h = harness({
+      policy: custom,
+      upstream: (call) =>
+        call.unit === "mistral" && unavailable
+          ? new Response('{"error":"Service Unavailable"}', { status: 503 })
+          : ok(),
     });
     const first = await h.send({});
     expect(first.status).toBe(200);
     expect(first.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
-    expect(h.calls.map(c => c.unit)).toEqual(["mistral-vibe", "q"]);
+    expect(h.calls.map((c) => c.unit)).toEqual(["mistral", "q"]);
     expect(h.names()).not.toContain("probe");
-    const cooled = h.health.entry("mistral-vibe " + model);
+    const cooled = h.health.entry(`mistral ${model}`);
     expect(cooled).toBeDefined();
     expect(cooled.probeIntervalMs).toBe(30_000);
     expect(cooled.nextProbeAt - cooled.since).toBe(30_000);
     expect(cooled.reason).toContain("transient:");
     unavailable = false;
     await h.timers[0]();
-    expect(h.health.isAlive("mistral-vibe " + model)).toBe(true);
+    expect(h.health.isAlive(`mistral ${model}`)).toBe(true);
   });
 
   test("quota 429 and ambiguous errors use exact 30-minute probes", async () => {
@@ -323,8 +334,8 @@ describe("LazyRouter", () => {
       [429, '{"error":"insufficient_quota"}'],
       [418, '{"error":"unknown failure"}'],
     ]) {
-      const h = harness({ upstream: (call) =>
-        call.unit === "p:gold#1" ? new Response(error, { status: code }) : ok(),
+      const h = harness({
+        upstream: (call) => (call.unit === "p:gold#1" ? new Response(error, { status: code }) : ok()),
       });
       const response = await h.send({});
       expect(response.status).toBe(200);
@@ -601,10 +612,16 @@ describe("LazyRouter", () => {
   });
 
   test("a provider 400 is request-scoped: skip duplicate accounts, do not probe/cool, and try another model", async () => {
-    const invalid = () => new Response(
-      JSON.stringify({ error: { message: "Invalid input. Please review your request before trying again.", type: "invalid_request_error" } }),
-      { status: 400 },
-    );
+    const invalid = () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            message: "Invalid input. Please review your request before trying again.",
+            type: "invalid_request_error",
+          },
+        }),
+        { status: 400 },
+      );
     const h = harness({ upstream: (call) => (call.body.model === "p/big" ? invalid() : ok()) });
     const response = await h.send({});
     expect(response.status).toBe(200);
@@ -617,10 +634,13 @@ describe("LazyRouter", () => {
   });
 
   test("a context-limit 400 skips models whose advertised window cannot clear the discovered requirement", async () => {
-    const tooLong = () => new Response(
-      JSON.stringify({ error: { message: "The input token count exceeds the maximum number of tokens allowed (1048576)." } }),
-      { status: 400 },
-    );
+    const tooLong = () =>
+      new Response(
+        JSON.stringify({
+          error: { message: "The input token count exceeds the maximum number of tokens allowed (1048576)." },
+        }),
+        { status: 400 },
+      );
     const h = harness({ upstream: (call) => (call.body.model === "p/big" ? tooLong() : ok()) });
     const response = await h.send({});
     expect(response.status).toBe(400);
@@ -852,10 +872,14 @@ describe("prefix affinity and capacity", () => {
   test("lazy/task rescues healthy idle limited units rejected only by cache admission", async () => {
     const policy = {
       ...LIMITED,
-      routes: { ...POLICY.routes,
-        task: { input: ["text"], periods: {
-          peak: [{ model: "p/big", tier: "gold" }],
-        } },
+      routes: {
+        ...POLICY.routes,
+        task: {
+          input: ["text"],
+          periods: {
+            peak: [{ model: "p/big", tier: "gold" }],
+          },
+        },
       },
     };
     const h = harness({ policy, clientModel: "lazy/task", upstream: ok });
@@ -869,9 +893,8 @@ describe("prefix affinity and capacity", () => {
     expect(response.status).toBe(200);
     expect(servedBy(response)).toBe("p:gold#1");
     expect(h.calls).toHaveLength(1);
-    expect(h.events.filter(e => e.event === "held-back" &&
-      e.reason === "admission")).toHaveLength(2);
-    expect(h.events.filter(e => e.event === "admission-rescue")).toHaveLength(1);
+    expect(h.events.filter((e) => e.event === "held-back" && e.reason === "admission")).toHaveLength(2);
+    expect(h.events.filter((e) => e.event === "admission-rescue")).toHaveLength(1);
     expect(h.names()).not.toContain("exhausted");
     await response.text();
     expect(inFlight(h)).toEqual([0, 0]);
@@ -880,14 +903,18 @@ describe("prefix affinity and capacity", () => {
   test("lazy/task rescue never exceeds hard maxInFlight, even when all units are healthy", async () => {
     const policy = {
       ...LIMITED,
-      routes: { ...POLICY.routes,
-        task: { input: ["text"], periods: {
-          peak: [{ model: "p/big", tier: "gold" }],
-        } },
+      routes: {
+        ...POLICY.routes,
+        task: {
+          input: ["text"],
+          periods: {
+            peak: [{ model: "p/big", tier: "gold" }],
+          },
+        },
       },
     };
     const h = harness({ policy, clientModel: "lazy/task", upstream: ok });
-    const slots = h.router.units.select("p").map(unit => h.router.capacity.slot(unit));
+    const slots = h.router.units.select("p").map((unit) => h.router.capacity.slot(unit));
     try {
       const response = await h.send({});
       expect(response.status).toBe(503);
@@ -903,22 +930,27 @@ describe("prefix affinity and capacity", () => {
   test("lazy/task rescue tries another idle unit if the first one fails upstream", async () => {
     const policy = {
       ...LIMITED,
-      routes: { ...POLICY.routes,
-        task: { input: ["text"], periods: {
-          peak: [{ model: "p/big", tier: "gold" }],
-        } },
+      routes: {
+        ...POLICY.routes,
+        task: {
+          input: ["text"],
+          periods: {
+            peak: [{ model: "p/big", tier: "gold" }],
+          },
+        },
       },
     };
     const h = harness({
-      policy, clientModel: "lazy/task",
-      upstream: call => call.unit === "p:gold#1" ? quota() : ok(),
+      policy,
+      clientModel: "lazy/task",
+      upstream: (call) => (call.unit === "p:gold#1" ? quota() : ok()),
     });
     const units = h.router.units.select("p");
     for (const unit of units) h.router.admission.evaluate(unit.key, 0.95, 1);
     const response = await h.send({});
     expect(response.status).toBe(200);
     expect(servedBy(response)).toBe("p:gold#2");
-    expect(h.events.filter(e => e.event === "admission-rescue")).toHaveLength(2);
+    expect(h.events.filter((e) => e.event === "admission-rescue")).toHaveLength(2);
     expect(h.names()).toContain("cooldown-enter");
   });
 
@@ -963,7 +995,6 @@ test("broker block reports are re-pointed at the pinned credential of the same p
   );
 });
 
-
 describe("ordered dedicated routes", () => {
   test("table order overrides intelligence and cost scoring", async () => {
     const policy = {
@@ -974,10 +1005,12 @@ describe("ordered dedicated routes", () => {
         default: {
           selection: "ordered",
           input: ["text"],
-          periods: { peak: [
-            { model: "q/text", intelligence: 10, cost: 10 },
-            { model: "p/big", tier: "gold", intelligence: 90, cost: 0.01 },
-          ] },
+          periods: {
+            peak: [
+              { model: "q/text", intelligence: 10, cost: 10 },
+              { model: "p/big", tier: "gold", intelligence: 90, cost: 0.01 },
+            ],
+          },
         },
       },
     };

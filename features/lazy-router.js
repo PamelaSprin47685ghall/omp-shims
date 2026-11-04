@@ -47,34 +47,36 @@ import { join } from "node:path";
 import { report } from "../lib/bootstrap.js";
 import { isGatewayProcess } from "../lib/gateway-process.js";
 import { readJson, wrapServe } from "../lib/inbound.js";
-import { disallowedClientModelRequest, forbiddenModelResponse, lazyOnlyModelCatalog } from "../lib/lazy-router/client-model-policy.js";
 import { AdmissionControl } from "../lib/lazy-router/admission.js";
 import { PrefixAffinity } from "../lib/lazy-router/affinity.js";
 import { createAttemptLayer } from "../lib/lazy-router/attempt.js";
 import { HolidayCalendar, loadHolidayData, PeakSchedule } from "../lib/lazy-router/calendar.js";
 import { InFlightTracker } from "../lib/lazy-router/capacity.js";
 import { ModelCatalog } from "../lib/lazy-router/catalog.js";
-import { withMistralFallback, mistralFallbackModelList } from "../lib/lazy-router/mistral-native-fallback.js";
-import { withCustomProviderFallback, customModelList } from "../lib/lazy-router/custom-provider-fallback.js";
-import { withExtensionFallback } from "../lib/lazy-router/extension-fallback.js";
-import { extensionModelList } from "../lib/lazy-router/extension-providers.js";
+import {
+  disallowedClientModelRequest,
+  forbiddenModelResponse,
+  lazyOnlyModelCatalog,
+} from "../lib/lazy-router/client-model-policy.js";
+import { ComposedPolicy, loadCompositionData } from "../lib/lazy-router/composed-policy.js";
 import { CredentialStore } from "../lib/lazy-router/credentials.js";
+import { withCustomProviderFallback } from "../lib/lazy-router/custom-provider-fallback.js";
+import { CyclicSpeed } from "../lib/lazy-router/cyclic-speed.js";
 import { GatewayDispatcher } from "../lib/lazy-router/dispatcher.js";
 import { createEventLog, summarizeUpstreamBody } from "../lib/lazy-router/events.js";
+import { withExtensionFallback } from "../lib/lazy-router/extension-fallback.js";
 import { FaultInjector } from "../lib/lazy-router/faults.js";
 import { formatForPath } from "../lib/lazy-router/formats.js";
 import { HealthRegistry } from "../lib/lazy-router/health.js";
 import { HealthStore } from "../lib/lazy-router/health-store.js";
-import { SharedStateStore } from "../lib/lazy-router/shared-state.js";
 import { ModelPerf } from "../lib/lazy-router/perf.js";
-import { ProviderConcurrencyProof } from "../lib/lazy-router/provider-concurrency-proof.js";
 import { loadPolicyData, RoutePolicy } from "../lib/lazy-router/policy.js";
-import { ComposedPolicy, loadCompositionData } from "../lib/lazy-router/composed-policy.js";
-import { CyclicSpeed } from "../lib/lazy-router/cyclic-speed.js";
-import { TokenTotals } from "../lib/lazy-router/token-totals.js";
+import { ProviderConcurrencyProof } from "../lib/lazy-router/provider-concurrency-proof.js";
 import { LazyRouter } from "../lib/lazy-router/router.js";
+import { SharedStateStore } from "../lib/lazy-router/shared-state.js";
 import { createStatusPage } from "../lib/lazy-router/status-page.js";
 import { TierDirectory } from "../lib/lazy-router/tiers.js";
+import { TokenTotals } from "../lib/lazy-router/token-totals.js";
 import { UnitDirectory } from "../lib/lazy-router/units.js";
 
 const MODELS_PATH = "/v1/models";
@@ -88,7 +90,11 @@ function authorizedTokenReset(request, tokenPath) {
   const provided = /^Bearer\s+([^\s]+)$/i.exec(request.headers.get("authorization") ?? "")?.[1];
   if (!provided) return false;
   let trusted;
-  try { trusted = readFileSync(tokenPath, "utf8").trim(); } catch { return false; }
+  try {
+    trusted = readFileSync(tokenPath, "utf8").trim();
+  } catch {
+    return false;
+  }
   if (!trusted) return false;
   const a = Buffer.from(provided);
   const b = Buffer.from(trusted);
@@ -97,7 +103,7 @@ function authorizedTokenReset(request, tokenPath) {
 const DEFAULT_BROKER_URL = "http://127.0.0.1:8765";
 
 /** Append the lazy entries to a /v1/models answer. */
-async function withLazyModels(response, entries) {
+async function _withLazyModels(response, entries) {
   if (response?.status !== 200) return response;
   try {
     const listing = await response.clone().json();
@@ -118,7 +124,10 @@ export function createLazyRouter(config, { log = report } = {}) {
   policyData.maxInFlight = { ...(policyData.maxInFlight ?? {}), ...(config.maxInFlight ?? {}) };
   const policy = config.routesFile ? new RoutePolicy(policyData) : new ComposedPolicy(policyData, { calendar });
   const schedule = new PeakSchedule({ calendar, windows: policy.peakWindows ?? loadPolicyData().peakWindows });
-  const emit = createEventLog({ out: config.out ?? process.env.OMP_SHIMS_LAZY_EVENT_LOG_PATH ?? join(ompDir, "logs", "lazy-router.jsonl"), report: log });
+  const emit = createEventLog({
+    out: config.out ?? process.env.OMP_SHIMS_LAZY_EVENT_LOG_PATH ?? join(ompDir, "logs", "lazy-router.jsonl"),
+    report: log,
+  });
   // In-flight limits, admission windows and account cooldowns are enforced for
   // the whole gateway, not per worker.
   const sharedState = new SharedStateStore({
@@ -127,7 +136,10 @@ export function createLazyRouter(config, { log = report } = {}) {
   });
   const concurrencyProof = new ProviderConcurrencyProof({
     shared: sharedState,
-    statePath: config.concurrencyProofStatePath ?? process.env.OMP_SHIMS_LAZY_CONCURRENCY_PROOF_STATE_PATH ?? join(ompDir, "lazy-router-concurrency-proof.json"),
+    statePath:
+      config.concurrencyProofStatePath ??
+      process.env.OMP_SHIMS_LAZY_CONCURRENCY_PROOF_STATE_PATH ??
+      join(ompDir, "lazy-router-concurrency-proof.json"),
     onProof: (evidence) => emit("provider-concurrency-proof", evidence),
   });
   const tokenPath = config.gatewayTokenPath ?? join(ompDir, "auth-gateway.token");
@@ -165,17 +177,25 @@ export function createLazyRouter(config, { log = report } = {}) {
   if (faults.active) log("lazy-router: TEST FAULTS ACTIVE — never use this config in production", config.testFaults);
   const perf = new ModelPerf({
     shared: sharedState,
-    statePath: config.perfStatePath ?? process.env.OMP_SHIMS_LAZY_PERF_STATE_PATH ?? join(ompDir, "lazy-router-perf.json"),
+    statePath:
+      config.perfStatePath ?? process.env.OMP_SHIMS_LAZY_PERF_STATE_PATH ?? join(ompDir, "lazy-router-perf.json"),
     ...(config.perfHistoryHalfLifeMs ? { historyHalfLifeMs: config.perfHistoryHalfLifeMs } : {}),
     ...(config.perfHistoryWeightCap ? { historyWeightCap: config.perfHistoryWeightCap } : {}),
   });
 
   const speed = new CyclicSpeed({
     shared: sharedState,
-    statePath: config.speedStatePath ?? process.env.OMP_SHIMS_LAZY_CYCLIC_SPEED_STATE_PATH ?? join(ompDir, "lazy-router-cyclic-speed.json"),
+    statePath:
+      config.speedStatePath ??
+      process.env.OMP_SHIMS_LAZY_CYCLIC_SPEED_STATE_PATH ??
+      join(ompDir, "lazy-router-cyclic-speed.json"),
   });
-  const tokenTotals = new TokenTotals({ path: config.tokenTotalsPath ??
-    process.env.OMP_SHIMS_LAZY_TOKEN_TOTALS_PATH ?? join(ompDir, "lazy-router-token-totals.sqlite") });
+  const tokenTotals = new TokenTotals({
+    path:
+      config.tokenTotalsPath ??
+      process.env.OMP_SHIMS_LAZY_TOKEN_TOTALS_PATH ??
+      join(ompDir, "lazy-router-token-totals.sqlite"),
+  });
   router = new LazyRouter({
     policy,
     units,
@@ -241,7 +261,6 @@ export function lazyRouterHandler(
     statusPath,
     gatewayTokenPath = join(homedir(), ".omp", "auth-gateway.token"),
     statusPage = createStatusPage({ statusPath, statusView: () => router.statusView() }),
-    extraModels = [],
   },
 ) {
   return async function lazyRouterInbound(request, server) {
@@ -250,21 +269,31 @@ export function lazyRouterHandler(
 
     if (pathname === RESET_TOKEN_TOTALS_PATH) {
       if (request.method !== "POST") {
-        return Response.json({ error: "method_not_allowed" }, {
-          status: 405, headers: { allow: "POST", "cache-control": "no-store" },
-        });
+        return Response.json(
+          { error: "method_not_allowed" },
+          {
+            status: 405,
+            headers: { allow: "POST", "cache-control": "no-store" },
+          },
+        );
       }
       if (!authorizedTokenReset(request, gatewayTokenPath)) {
-        return Response.json({ error: "unauthorized" }, {
-          status: 401, headers: { "cache-control": "no-store" },
-        });
+        return Response.json(
+          { error: "unauthorized" },
+          {
+            status: 401,
+            headers: { "cache-control": "no-store" },
+          },
+        );
       }
       const ok = router.resetTokenTotals();
-      return Response.json(ok
-        ? { ok: true, tokenTotals: router.statusView().tokenTotals }
-        : { error: "counter_unavailable" }, {
-        status: ok ? 200 : 503, headers: { "cache-control": "no-store" },
-      });
+      return Response.json(
+        ok ? { ok: true, tokenTotals: router.statusView().tokenTotals } : { error: "counter_unavailable" },
+        {
+          status: ok ? 200 : 503,
+          headers: { "cache-control": "no-store" },
+        },
+      );
     }
 
     // Even a read-only status page must reflect the stock host catalog.
@@ -274,8 +303,8 @@ export function lazyRouterHandler(
     const page = statusPage(request.method, pathname);
     if (page) return page;
     if (request.method === "GET") {
-      if (pathname === MODELS_PATH) return lazyOnlyModelCatalog(
-        await handler(request, server), router.advertisedModels());
+      if (pathname === MODELS_PATH)
+        return lazyOnlyModelCatalog(await handler(request, server), router.advertisedModels());
       if (pathname === statusPath) return router.status();
       return handler(request, server);
     }
@@ -286,9 +315,16 @@ export function lazyRouterHandler(
     const body = await readJson(request);
     // No direct model selection from clients. The Lazy Router dispatcher
     // uses the captured inner host handler for pinned concrete attempts.
-    if (disallowedClientModelRequest({
-      method: request.method, pathname, body, router, supportedFormat: Boolean(format),
-    })) return forbiddenModelResponse();
+    if (
+      disallowedClientModelRequest({
+        method: request.method,
+        pathname,
+        body,
+        router,
+        supportedFormat: Boolean(format),
+      })
+    )
+      return forbiddenModelResponse();
     if (!format) return handler(request, server);
     return router.serve(format, body, request);
   };
@@ -326,28 +362,26 @@ export function install(config, context) {
   }
   context.addFetchHandler(attemptLayer);
   tiers.start();
-  wrapServe((handler) => lazyRouterHandler(
-    withExtensionFallback(
-      withCustomProviderFallback(
-        withMistralFallback(handler, {
+  wrapServe((handler) =>
+    lazyRouterHandler(
+      withExtensionFallback(
+        withCustomProviderFallback(handler, {
+          nativeRegistered: (model) => catalog.hasNativeModel(model),
+          tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+        }),
+        {
           credentials,
           nativeRegistered: (model) => catalog.hasNativeModel(model),
           tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
-        }), {
-          nativeRegistered: (model) => catalog.hasNativeModel(model),
-          tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
         },
-      ), {
-        credentials,
-        nativeRegistered: (model) => catalog.hasNativeModel(model),
-        tokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
+      ),
+      {
+        router,
+        dispatcher,
+        statusPath: config.statusPath,
+        gatewayTokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
       },
     ),
-    {
-      router, dispatcher, statusPath: config.statusPath,
-      gatewayTokenPath: config.gatewayTokenPath ?? join(homedir(), ".omp", "auth-gateway.token"),
-      extraModels: () => [...mistralFallbackModelList(), ...customModelList(), ...extensionModelList()],
-    },
-  ));
+  );
   context.log?.("lazy-router: enabled", { routes: router.policy.routeNames });
 }
