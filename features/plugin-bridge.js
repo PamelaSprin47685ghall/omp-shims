@@ -20,7 +20,14 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { activePin } from "../lib/credential-pin.js";
+import { publishExtensionProvider } from "../lib/lazy-router/extension-providers.js";
+import { installOpenAiApiFlex } from "../lib/openai-api-flex.js";
 import { stableIdentityOAuth } from "../lib/oauth-identity.js";
+import {
+  installMistralVibeResponseAdapter,
+  MISTRAL_VIBE_PROVIDER_ID,
+  mistralVibeProviderConfig,
+} from "../lib/mistral-vibe-provider.js";
 
 const require_ = createRequire(import.meta.url);
 const PLUGIN_SOURCE = "omp-shims";
@@ -206,8 +213,71 @@ const PLACEHOLDER_KEYS = new Set([
  */
 const DEFAULT_MAX_RETRIES = 3;
 
+/**
+ * Qoder reports account/lane capacity exhaustion as an in-stream error instead
+ * of an HTTP 429. OMP can rotate sibling credentials before any replay-unsafe
+ * output, but only when the terminal error carries usage-limit semantics. Add a
+ * machine-readable marker while preserving the provider's detailed message.
+ */
+export function normalizeQoderCapacityEvent(provider, event) {
+  if (provider !== "qoder" && provider !== "qoder-cn") return event;
+  if (event?.type !== "error") return event;
+  const message = event?.error?.errorMessage;
+  if (typeof message !== "string" || !message.includes("serviceAvailable:false")) return event;
+  if (!message.includes("RESOURCE_LIMIT") && !/无可用容量|no spare capacity/i.test(message)) return event;
+  if (/resource_exhausted/i.test(message)) return event;
+  return {
+    ...event,
+    error: { ...event.error, errorMessage: `${message}\n[omp-shims:qoder-capacity resource_exhausted]` },
+  };
+}
+
+function normalizeCommandCodeContext(context) {
+  if (!context || !Array.isArray(context.messages)) return context;
+  const messages = context.messages.map((message) => {
+    if (message.role !== "assistant") return message;
+    const thinking = message.reasoning_content ?? message.reasoning;
+    if (typeof thinking !== "string" || thinking === "") return message;
+    const content = Array.isArray(message.content) ? [...message.content] : [];
+    if (!content.some((part) => part?.type === "thinking")) {
+      content.unshift({ type: "thinking", thinking });
+    }
+    return { ...message, content };
+  });
+  return { ...context, messages };
+}
+
+/** Adapt pi-ai stream events at the gateway boundary, before the host reads
+ * event.content.length. Some host variants check that field on start/delta
+ * events too; the original pi-ai events only set delta/partial. This is scoped
+ * to the Mistral native adapter so unrelated transports are unchanged.
+ */
+export function normalizeNativeMistralEvent(event) {
+  if (!event || typeof event !== "object") return event;
+  if (event.type === "text_end" || event.type === "thinking_end") {
+    if (Array.isArray(event.content)) return event;
+    const text = typeof event.content === "string" ? event.content : (event.content?.text ?? "");
+    const block = event.type === "thinking_end"
+      ? { type: "thinking", thinking: text, thinkingSignature: event.thinkingSignature ?? "" }
+      : { type: "text", text };
+    return { ...event, content: [block] };
+  }
+  // OMP's consumer can inspect .content even for a *_start or *_delta
+  // emitted by the standard pi-ai serializer, which has no such property.
+  if (event.type === "text_start" || event.type === "thinking_start") {
+    return event.content === undefined ? { ...event, content: [] } : event;
+  }
+  if (event.type === "text_delta" || event.type === "thinking_delta") {
+    return event.content === undefined
+      ? { ...event, content: typeof event.delta === "string" ? event.delta : "" }
+      : event;
+  }
+  return event;
+}
+
 function wrapTransportEvents(transport, provider) {
   return function wrappedStreamSimple(model, context, options) {
+    const nextContext = provider === "commandcode" ? normalizeCommandCodeContext(context) : context;
     const next = { ...options };
     // pi plugins pass `$ENV_KEY` placeholders for "resolve this yourself". OMP
     // would send the literal string as the bearer token, so drop it and let the
@@ -219,11 +289,15 @@ function wrapTransportEvents(transport, provider) {
     const pinnedSecret = activePin(provider)?.transportSecret;
     if (pinnedSecret) next.apiKey = pinnedSecret;
     if (next.maxRetries === undefined) next.maxRetries = DEFAULT_MAX_RETRIES;
-    const stream = transport(model, context, next);
+    const stream = transport(model, nextContext, next);
     if (!stream || typeof stream.push !== "function") return stream;
 
     const originalPush = stream.push.bind(stream);
     stream.push = (event) => {
+      event = normalizeQoderCapacityEvent(provider, event);
+      if (provider === MISTRAL_VIBE_PROVIDER_ID) {
+        return originalPush(normalizeNativeMistralEvent(event));
+      }
       if (event?.type !== "text_end" && event?.type !== "thinking_end") return originalPush(event);
       if (Array.isArray(event.content)) return originalPush(event);
       const { content, ...rest } = event;
@@ -238,8 +312,10 @@ function wrapTransportEvents(transport, provider) {
   };
 }
 
-export function install(config, context) {
+export async function install(config, context) {
   const log = context.log ?? (() => {});
+  installMistralVibeResponseAdapter(context);
+  installOpenAiApiFlex(context);
   const pluginsDir = config.pluginsDir ?? join(homedir(), ".omp", "plugins");
   // Token specs are provider-agnostic and live outside `features`, so they are
   // merged in from the top-level `pluginBridge` section by the bootstrap.
@@ -247,11 +323,8 @@ export function install(config, context) {
   const only = config.plugins ? new Set(config.plugins) : null;
 
   const packages = discoverPlugins(pluginsDir).filter((pkg) => !only || only.has(pkg.name));
-  if (packages.length === 0) {
-    log("plugin-bridge: no installed plugins found", { pluginsDir });
-    return;
-  }
-  log(`plugin-bridge: discovered ${packages.length} plugin(s) in ${pluginsDir}`);
+  if (packages.length === 0) log("plugin-bridge: no external plugins found", { pluginsDir });
+  else log(`plugin-bridge: discovered ${packages.length} plugin(s) in ${pluginsDir}`);
 
   // One registration pass per registry at a time; `populated` registries
   // already hold the plugins, so the hot getAll path skips them and only
@@ -276,31 +349,76 @@ export function install(config, context) {
   // without an entry fails every refresh ("Unknown OAuth provider") and each
   // request pays the failed-refresh retry before falling back.
   const registeredOauth = new Set();
+  const pendingOauth = new Map();
+  // Providers collected during eager plugin init. getAll() is synchronous, so
+  // it cannot await plugin loading; this cache lets it replace any built-in
+  // provider before returning the very first model snapshot.
+  const preparedProviders = new Map();
+  const internalProviders = [{ id: MISTRAL_VIBE_PROVIDER_ID, config: mistralVibeProviderConfig() }];
 
   let oauthBridgeUnavailableLogged = false;
 
-  /**
-   * Register one plugin OAuth config into the host's runtime OAuth registry.
-   * The registry-capture hook exposes `registerOAuthProvider` once the host
-   * materializes that export; until then this is a no-op and the plugin's
-   * oauth config still reaches the registry through registerProvider.
-   */
-  function bridgeOauth(id, pluginOauth) {
-    const oauth = stableIdentityOAuth(id, pluginOauth);
-    const registerOauth = globalThis.__OMP_SHIMS_HOST__?.captured?.get("registerOAuthProvider");
-    if (typeof registerOauth !== "function") {
-      if (!oauthBridgeUnavailableLogged) {
-        oauthBridgeUnavailableLogged = true;
-        log("plugin-bridge: host registerOAuthProvider unavailable; OAuth refresh left to registerProvider");
-      }
+  function registerOauthConfig(registerOauth, id, oauth) {
+    if (registeredOauth.has(id)) {
+      pendingOauth.delete(id);
       return;
     }
     try {
       registerOauth({ ...oauth, id, sourceId: `${PLUGIN_SOURCE}:oauth` });
       registeredOauth.add(id);
+      pendingOauth.delete(id);
       logOnChange(`oauth:${id}`, `plugin-bridge: registered OAuth provider ${id}`);
     } catch (error) {
       log(`plugin-bridge: registerOAuthProvider(${id}) failed: ${error.message}`);
+    }
+  }
+
+  /** Flush OAuth providers queued before the host export left its TDZ. */
+  function flushPendingOauth(registerOauth) {
+    if (typeof registerOauth !== "function") return;
+    for (const [id, oauth] of pendingOauth) registerOauthConfig(registerOauth, id, oauth);
+  }
+
+  /**
+   * Register one plugin OAuth config into the host's runtime OAuth registry.
+   * The auth-broker does not construct a ModelRegistry, so if the host export
+   * is still in TDZ during eager plugin init we must retain this config until
+   * registry-capture announces registerOAuthProvider later.
+   */
+  function bridgeOauth(id, pluginOauth) {
+    if (registeredOauth.has(id)) return;
+    const oauth = stableIdentityOAuth(id, pluginOauth);
+    pendingOauth.set(id, oauth);
+    const registerOauth = globalThis.__OMP_SHIMS_HOST__?.captured?.get("registerOAuthProvider");
+    if (typeof registerOauth !== "function") {
+      if (!oauthBridgeUnavailableLogged) {
+        oauthBridgeUnavailableLogged = true;
+        log("plugin-bridge: host registerOAuthProvider unavailable; OAuth registration deferred");
+      }
+      return;
+    }
+    registerOauthConfig(registerOauth, id, oauth);
+  }
+
+  function prepareProvider(id, providerConfig) {
+    if (!providerConfig?.streamSimple && !providerConfig?.models) return undefined;
+    const config = { ...providerConfig };
+    if (config.oauth) config.oauth = stableIdentityOAuth(id, config.oauth);
+    if (typeof config.streamSimple === "function") {
+      config.streamSimple = wrapTransportEvents(config.streamSimple, id);
+      if (config.api) context.registerTransport?.(config.api, config.streamSimple);
+    }
+    return config;
+  }
+
+  /** Register already-loaded plugin providers synchronously before getAll(). */
+  function registerPreparedInto(registry) {
+    for (const [id, prepared] of preparedProviders) {
+      try {
+        registry.registerProvider(id, prepared.config, prepared.source);
+      } catch (error) {
+        log("plugin-bridge: registerProvider(" + id + ") failed: " + error.message);
+      }
     }
   }
 
@@ -313,6 +431,9 @@ export function install(config, context) {
    * modules are cached by the module loader, so the double init is cheap.
    */
   const eagerInit = (async () => {
+    for (const { id, config: providerConfig } of internalProviders) {
+      if (providerConfig.oauth) bridgeOauth(id, providerConfig.oauth);
+    }
     for (const pkg of packages) {
       for (const entry of pkg.entries) {
         let module;
@@ -330,6 +451,14 @@ export function install(config, context) {
               if (providerConfig?.oauth && typeof providerConfig.oauth === "object") {
                 bridgeOauth(id, providerConfig.oauth);
               }
+              const prepared = prepareProvider(id, providerConfig);
+              if (!prepared) return;
+              preparedProviders.set(id, {
+                config: prepared,
+                source: PLUGIN_SOURCE + ":" + pkg.name,
+              });
+              if (id === "kiro" || id === "commandcode") publishExtensionProvider(id, prepared);
+              tokens.set(id, resolveToken(id));
             }),
           );
         } catch (error) {
@@ -345,6 +474,18 @@ export function install(config, context) {
 
     const task = (async () => {
       const sources = new Set();
+      const discoverableProviders = new Set();
+      for (const { id, config: providerConfig } of internalProviders) {
+        try {
+          registry.registerProvider(id, prepareProvider(id, providerConfig), `${PLUGIN_SOURCE}:internal`);
+          if (providerConfig.oauth) bridgeOauth(id, providerConfig.oauth);
+          sources.add(`${PLUGIN_SOURCE}:internal`);
+          if (typeof providerConfig.fetchDynamicModels === "function") discoverableProviders.add(id);
+          logOnChange(`provider:${id}`, `plugin-bridge: registered ${id} (${providerConfig.models?.length ?? 0} models) from omp-shims`);
+        } catch (error) {
+          log(`plugin-bridge: registerProvider(${id}) failed: ${error.message}`);
+        }
+      }
       for (const pkg of packages) {
         for (const entry of pkg.entries) {
           let module;
@@ -368,19 +509,13 @@ export function install(config, context) {
                 try {
                   // OMP consumes the provider's events directly, so a pi-shaped
                   // transport is adapted before it is handed over.
-                  const config = { ...providerConfig };
-                  if (config.oauth) config.oauth = stableIdentityOAuth(id, config.oauth);
-                  if (typeof config.streamSimple === "function") {
-                    config.streamSimple = wrapTransportEvents(config.streamSimple, id);
-                    // Let the vendored pi-ai shim dispatch to this provider, for
-                    // the case where a plugin streams through its own
-                    // `streamSimple` import instead of OMP's pipeline.
-                    if (config.api) context.registerTransport?.(config.api, config.streamSimple);
-                  }
+                  const config = prepareProvider(id, providerConfig);
+                  if (!config) return;
                   registry.registerProvider(id, config, `${PLUGIN_SOURCE}:${pkg.name}`);
                   if (providerConfig.oauth && typeof providerConfig.oauth === "object")
                     bridgeOauth(id, providerConfig.oauth);
                   sources.add(`${PLUGIN_SOURCE}:${pkg.name}`);
+                  if (typeof providerConfig.fetchDynamicModels === "function") discoverableProviders.add(id);
                   tokens.set(id, resolveToken(id));
                   logOnChange(
                     `provider:${id}`,
@@ -442,13 +577,29 @@ export function install(config, context) {
         log("plugin-bridge: registry has no authStorage.keys.setConfig; credentials left to OMP");
       }
 
+      // registerProvider installs fetchDynamicModels managers, but discovery is
+      // deferred until refreshDiscoverableProviders. The gateway refresh that
+      // led here already finished before plugin providers were registered, so
+      // drive their first credential-aware catalog refresh now.
+      if (discoverableProviders.size > 0 && typeof registry.refreshDiscoverableProviders === "function") {
+        try {
+          await registry.refreshDiscoverableProviders(discoverableProviders, "online-if-uncached");
+        } catch (error) {
+          log(`plugin-bridge: dynamic model discovery failed: ${error.message}`);
+        }
+      }
+
       if (process.env.OMP_SHIMS_DEBUG_REGISTRY === "1") {
         for (const [provider] of tokens) {
           const state = { provider };
           try {
             state.hasProvider = registry.hasProvider?.(provider);
             state.concreteAuth = registry.hasConcreteAuth?.(provider);
-            state.models = registry.getProviderModels?.(provider)?.length;
+            const providerModels = registry.getProviderModels?.(provider) ?? [];
+            state.models = providerModels.length;
+            state.providerApi = registry.getRegisteredProviderConfig?.(provider)?.api;
+            state.modelApis = [...new Set(providerModels.map((model) => model.api).filter(Boolean))].sort();
+            state.hasNativeProvider = Boolean(registry.getRegisteredNativeProvider?.(provider));
             state.keySource = keys?.source?.(provider);
             state.available = registry.getAvailableForProviders?.(new Set([provider]), "chat")?.length;
           } catch (error) {
@@ -482,6 +633,7 @@ export function install(config, context) {
         // `getAll` is sync: run registration eagerly so the caller sees plugins
         // on its very first call, and let any async tail settle on its own.
         if (method === "getAll") {
+          if (!populated.has(this)) registerPreparedInto(this);
           const res = original.apply(this, args);
           if (!populated.has(this)) registerInto(this).catch(() => {});
           return res;
@@ -522,6 +674,11 @@ export function install(config, context) {
     log("plugin-bridge: hooked ModelRegistry refresh/getAll");
   }
 
+  // Do not let OMP continue startup until plugin configs and transports are
+  // prepared. This makes PROCESS_FEATURES load order real, including the async
+  // vendor-shims -> plugin-bridge dependency.
+  await eagerInit;
+
   // The capture lives in its own preloaded module so it can install itself
   // before this file's static imports are evaluated.
   const host = globalThis.__OMP_SHIMS_HOST__;
@@ -529,6 +686,8 @@ export function install(config, context) {
     log("plugin-bridge: host capture unavailable (is registry-capture.js preloaded first?)");
     return;
   }
+  host.observe("registerOAuthProvider", flushPendingOauth);
+  flushPendingOauth(host.captured?.get("registerOAuthProvider"));
   host.observe("ModelRegistry", hookRegistryClass);
   // The class may already have been announced before this feature loaded.
   hookRegistryClass(host.captured?.get("ModelRegistry"));

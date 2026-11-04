@@ -31,7 +31,7 @@ on every machine.
 | --- | --- | --- |
 | `plugin-bridge` | on | Loads installed OMP plugins and registers their providers with the gateway's model registry, so `kiro/*` and `commandcode/*` are served natively instead of returning `Unknown model`. |
 | `models-bridge` | on | Exposes custom models declared in `models.yml` to the gateway's model registry and supplies credentials, so they can be reverse-proxied. |
-| `vendor-shims` | on | Installs the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` packages that pi provider plugins expect the host to provide, and routes their streaming to the host and to each provider's own transport. |
+| `vendor-shims` | on | Installs the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` packages that pi provider plugins expect the host to provide, and routes their streaming to the host and to each provider's own transport. When the host exports no `streamSimple` for a standard api, it asks the model's Provider API once whether the account may use it, so a `403 upgrade_required` still reaches the provider's transport and its generate fallback can run. |
 | `ipv6-first` | on | Connects over IPv6 when a host publishes AAAA records, falling back to IPv4 per address. |
 | `antigravity-system-instruction` | on | Sends the Antigravity system prompt as a leading user turn; upstream answers a real `systemInstruction` with a bogus 429. |
 | `antigravity-routing` | **off** | Routes Gemini 3.6/3.7/3.8 Flash to the upstream `-tiered` models with a thinking level. |
@@ -107,6 +107,51 @@ bun ~/.omp/plugins/omp-shims/bin/omp-shims.js env
 
 Do not put provider API keys in the unit. Use `omp /login`, which writes to the
 agent's credential store where the gateway already looks.
+
+### Multiple workers
+
+One gateway process serves every request on a single JavaScript thread, so
+throughput is bounded by per-request CPU. Several workers can share the same
+listen address: set `OMP_SHIMS_REUSE_PORT=1` in every worker and let the kernel
+spread new connections (`SO_REUSEPORT`). Each connection then stays on the
+worker that accepted it, which is what keeps prompt-cache affinity.
+
+A template unit is the shortest path:
+
+```ini
+# /etc/systemd/system/omp-auth-gateway@.service
+[Service]
+Environment="OMP_SHIMS_REUSE_PORT=1"
+Environment="OMP_SHIMS_LAZY_PERF_STATE_PATH=/root/.omp/w%i-perf.json"
+Environment="OMP_SHIMS_LAZY_CYCLIC_SPEED_STATE_PATH=/root/.omp/w%i-speed.json"
+Environment="OMP_SHIMS_LAZY_CONCURRENCY_PROOF_STATE_PATH=/root/.omp/w%i-proof.json"
+Environment="OMP_SHIMS_LAZY_EVENT_LOG_PATH=/root/.omp/logs/lazy-router-w%i.jsonl"
+ExecStart=/root/.local/bin/omp auth-gateway serve --bind=127.0.0.1:4000
+```
+
+Every piece of routing state is shared, with eventual consistency (each worker
+refreshes its view every couple of seconds; writes are write-through):
+
+| File | Shared state |
+| --- | --- |
+| `~/.omp/lazy-router-health.sqlite` | cooldowns, probe leases |
+| `~/.omp/lazy-router-state.sqlite` | in-flight semaphore, admission windows, Antigravity account cooldowns, perf window and history, cyclic speed statistics (one row per worker, summed on read), concurrency proofs (shared generation intervals — first token to end — so the number is gateway-wide), affinity prefixes |
+| `~/.omp/lazy-router-token-totals.sqlite` | usage totals, so the status page reports the whole gateway |
+| `~/.omp/logs/lazy-router.jsonl` | one event log for every worker, rotated at 64 MiB |
+
+The former per-worker files (`lazy-router-perf.json`, `-cyclic-speed.json`,
+`-concurrency-proof.json`, `lazy-router-wN-*.jsonl`) are no longer used when the
+shared store is enabled; they remain the fallback when it is not.
+
+- `~/.omp/lazy-router-health.sqlite` — cooldowns. Every worker mirrors the
+  rows, writes its own changes through, and only the worker that wins a row's
+  lease sends the recovery probe, so one interval means one probe for the whole
+  gateway.
+- `~/.omp/lazy-router-state.sqlite` — the in-flight semaphore per unit (with a
+  heartbeat and reaping, so a dead worker cannot hold slots), the admission
+  window of limited units, and Antigravity account cooldowns.
+- `~/.omp/lazy-router-token-totals.sqlite` — usage totals, so the status page
+  reports the whole gateway.
 
 ## Configuration
 
@@ -191,8 +236,16 @@ OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
 | | | `OMP_SHIMS_TRAFFIC_LOG_BODY=0` omits bodies | bodies logged |
 | `plugin-bridge` | `pluginsDir`, `plugins` (allow-list) | | `~/.omp/plugins`, all |
 | `models-bridge` | `modelsPath` | `OMP_SHIMS_MODELS_PATH` | `~/.omp/agent/models.yml` |
+| `models-bridge` | `excludeProviders` | — | `[]` (providers present in synced models.yml but intentionally not registered on this host) |
 | `vendor-shims` | `pluginsDir` | `OMP_SHIMS_VENDOR_SKIP=1` skips it | `~/.omp/plugins` |
 | `lazy-router` | `routesFile`, `holidaysFile` | | bundled `lib/lazy-router/*.json` |
+| | | `OMP_SHIMS_REUSE_PORT=1` shares one listen address between workers | off |
+| | `out` | `OMP_SHIMS_LAZY_EVENT_LOG_PATH` | `~/.omp/logs/lazy-router.jsonl` |
+| | | `OMP_SHIMS_LAZY_EVENT_LOG_MAX_BYTES` (0 = never rotate) | `67108864` |
+| | `perfStatePath`, `speedStatePath`, `concurrencyProofStatePath` | `OMP_SHIMS_LAZY_PERF_STATE_PATH`, `OMP_SHIMS_LAZY_CYCLIC_SPEED_STATE_PATH`, `OMP_SHIMS_LAZY_CONCURRENCY_PROOF_STATE_PATH` | `~/.omp/lazy-router-*.json` |
+| | `healthDbPath` | `OMP_SHIMS_LAZY_HEALTH_DB_PATH` | `~/.omp/lazy-router-health.sqlite` |
+| | `stateDbPath` | `OMP_SHIMS_LAZY_STATE_DB_PATH` | `~/.omp/lazy-router-state.sqlite` |
+| | | `OMP_SHIMS_PROFILE=1` prints per-stage CPU per window | off |
 | | `probeIntervalMs`, `probeTimeoutMs` | | `1800000`, `90000` |
 | | `tierRefreshMs`, `tierRecheckMs` | | `21600000`, `60000` |
 | | `headerTimeoutMs`, `providerHeaderTimeoutMs` | | `300000`, `{ "commandcode": 1800000 }` |
@@ -295,7 +348,25 @@ account.
   reasoning traits where the provider plugin's catalog is wrong; for providers
   whose plugin drops the effort of such a model (Command Code), the attempt layer
   writes it into the provider body itself (`lib/lazy-router/upstream-effort.js`).
-  The Command Code `minimax-m3.1-flash:free` entries think at `low`.
+- `lazy-router`: rolling per-model serving performance. Every streamed answer —
+  routed or a direct model id — is measured for first-token latency (request to
+  the first event only the model can produce, not the gateway's own preamble)
+  and generation speed (the provider's own output-token total over the time
+  those tokens took), plus the average total request duration, which counts
+  every measured answer, streamed or delivered whole. Sums live in one-minute
+  buckets over a 30-minute window, so a long answer weighs what it should and a
+  fixed model recovers inside the window. `GET /v1/lazy/status` exposes them as
+  `perf`, the page shows three columns per route row plus a per-model table, and
+  chat streams now ask for `stream_options.include_usage` so the token totals
+  exist to measure. A model with more than 100 samples in the window and an
+  average total duration above 10 s (`degradeMinSamples` / `degradeTotalMs`) is
+  marked degraded: its rows turn red, and the router tries every healthy unit in
+  table order before any degraded one. A prefix-affinity match still outranks
+  the rule, so a warm prefix keeps its unit even while that model is red. The
+  verdict is latched for 30 minutes (`degradeHoldMs`), so a model near the
+  ceiling cannot flap between the two groups; after the period the window decides
+  again and a still-slow model is latched for another period.
+- `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - **Failure handling**: the verdict is taken on the upstream status, before a byte
   is streamed, and the reaction depends on whose fault the failure was
   (`lib/lazy-router/failures.js`). A client that closed the request (or a gateway

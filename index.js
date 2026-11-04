@@ -17,6 +17,7 @@ import {
   PROCESS_FEATURES,
 } from "./lib/bootstrap.js";
 import { CONFIG_PATH, describeConfig, FEATURES, loadConfig, readConfigFile, writeConfig } from "./lib/config.js";
+import { MISTRAL_VIBE_PROVIDER_ID, mistralVibeProviderConfig } from "./lib/mistral-vibe-provider.js";
 
 /** Interactive sessions get the fetch layers and process features, not the background watchers. */
 const LOAD_ORDER = [...FETCH_LAYERS, ...PROCESS_FEATURES];
@@ -51,6 +52,8 @@ export default function ompShims(pi) {
     // session token + real model for it. The auth-gateway advertises the
     // alias itself and rewrites it inbound, and registering there too would
     // override its full dynamic catalog — hence the guard.
+    pi.registerProvider?.(MISTRAL_VIBE_PROVIDER_ID, mistralVibeProviderConfig());
+
     pi.registerProvider?.("github-copilot", {
       baseUrl: "https://api.githubcopilot.com",
       api: "openai-completions",

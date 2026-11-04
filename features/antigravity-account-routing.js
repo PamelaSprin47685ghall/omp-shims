@@ -26,6 +26,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { activePin } from "../lib/credential-pin.js";
+import { SharedStateStore } from "../lib/lazy-router/shared-state.js";
 import {
   appendJsonLine,
   isCloudCodeStream,
@@ -174,6 +175,11 @@ export function install(config, context) {
     process.env.OMP_SHIMS_AG_ACCOUNTS_OUT ??
     join(homedir(), ".omp", "logs", "antigravity-accounts.jsonl");
   const record = (entry) => appendJsonLine(out, entry);
+  // Account cooldowns are shared: an account benched by one worker must stop
+  // receiving traffic from all of them.
+  const sharedState = new SharedStateStore({
+    path: process.env.OMP_SHIMS_LAZY_STATE_DB_PATH ?? join(homedir(), ".omp", "lazy-router-state.sqlite"),
+  });
 
   log("antigravity-account-routing: enabled (sequential drain)", { ultraEmails, proEmails, cooldownMs });
 
@@ -236,6 +242,16 @@ export function install(config, context) {
 
     if (cachedAccounts.length === 0) return next(input, init);
 
+    // Apply cooldowns recorded by any worker; a local timestamp is kept when it
+    // is later, so a failed shared write cannot lose this worker's own state.
+    const sharedCooldowns = sharedState.cooldowns();
+    if (sharedCooldowns.size > 0) {
+      for (const account of cachedAccounts) {
+        const until = sharedCooldowns.get(account.email.toLowerCase());
+        if (until !== undefined && until > account.cooldownUntil) account.cooldownUntil = until;
+      }
+    }
+
     const brokerToken = getBrokerToken();
     const isUltraRequired = ultraPattern.test(model);
     const now = Date.now();
@@ -290,6 +306,7 @@ export function install(config, context) {
           cooldownDuration = parseCooldownMs(bodyClone, cooldownMs);
         } catch {}
         candidate.cooldownUntil = Date.now() + cooldownDuration;
+        sharedState.setCooldown(candidate.email.toLowerCase(), candidate.cooldownUntil, "429");
         log(
           `antigravity-account-routing: ultra account ${candidate.email} returned 429; cooling down for ${Math.round(cooldownDuration / 1000)}s`,
         );
@@ -346,6 +363,7 @@ export function install(config, context) {
         cooldownDuration = parseCooldownMs(bodyClone, cooldownMs);
       } catch {}
       candidate.cooldownUntil = Date.now() + cooldownDuration;
+      sharedState.setCooldown(candidate.email.toLowerCase(), candidate.cooldownUntil, "429");
       log(
         `antigravity-account-routing: account ${candidate.email} returned 429; cooling down for ${Math.round(cooldownDuration / 1000)}s`,
       );

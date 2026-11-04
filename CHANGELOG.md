@@ -8,6 +8,59 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `profile`: opt-in per-stage CPU attribution for the gateway request path
+  (`OMP_SHIMS_PROFILE=1`), one aggregate line per window; off by default.
+- `lazy-router`: `OMP_SHIMS_REUSE_PORT=1` lets several gateway workers bind the
+  same address, so the kernel spreads new connections and each connection keeps
+  its worker (and its prompt-cache affinity).
+- `lazy-router`: cooldowns are shared between workers through
+  `~/.omp/lazy-router-health.sqlite` (`OMP_SHIMS_LAZY_HEALTH_DB_PATH`). State
+  changes are written through, each worker mirrors rows written by the others,
+  and a probe runs only in the worker that wins the row's lease.
+- `lazy-router`: in-flight limits, admission windows and Antigravity account
+  cooldowns are shared between workers through
+  `~/.omp/lazy-router-state.sqlite` (`OMP_SHIMS_LAZY_STATE_DB_PATH`). The
+  semaphore is per worker with a heartbeat and stale-row reaping; a store
+  failure degrades to per-worker accounting instead of rejecting traffic.
+- `lazy-router`: the perf window, cyclic speed statistics, concurrency proofs
+  and affinity prefixes are shared through the same store (eventual
+  consistency: write-through plus a 2 s refresh). Speed rows are per worker and
+  summed on read; affinity falls back to the shared table only on a local miss.
+  Concurrency proofs are computed from shared attempt intervals: the verified
+  number is the largest count of successful attempts that were *emitting tokens*
+  at the same instant across every worker, not the largest per-worker cohort.
+  The interval starts at the first output token, so time spent waiting for it
+  (queueing, prompt processing) never counts as concurrency.
+- `lazy-router`: the status page shows the gateway-wide in-flight request count
+  (open upstream attempts across live workers) as its first metric.
+- `lazy-router`: the Mistral Vibe per-key model cap is 60 concurrent requests
+  (was 20).
+- `lazy-router`: the router event log rotates at 64 MiB
+  (`OMP_SHIMS_LAZY_EVENT_LOG_MAX_BYTES`, one generation kept) instead of growing
+  without bound.
+
+### Changed
+
+- Performance, request path: a request body is read and parsed once and shared
+  by every inbound layer (optional-null normalization, tool-id hashing, the
+  router, the provider fallbacks) instead of four to five times. `rewriteBody`
+  shallow-copies the body instead of `structuredClone`-ing a multi-megabyte
+  transcript. Measured on a 1.2 MB transcript: 204 ms → 116 ms CPU per request,
+  RSS 1.5–2.2 GB → ~1.0 GB.
+- Performance, tool-id-hash: a body with no tool-call id is left untouched, ids
+  are re-serialised once (not twice), and the SSE restore path forwards chunks
+  with no minted id (`_h`) as raw bytes without decoding or parsing them.
+- Performance, `lazy-router`: token-usage walks run only for events that carry
+  a usage container; the perf window is written 5 s after the last sample
+  instead of synchronously on every answer; recorded affinity prefixes round
+  down to a 16 KiB grid, which bounds the number of digests a lookup computes.
+- Performance, `gateway-compat` and `copilot-auto`: both work on the shared
+  parsed body, and the Copilot rewrite parses only bodies that name an auto
+  model.
+
+
+- `lazy-router`: add `lazy/weak`, a text-only 250K-context / 32K-output route for Command Code Laguna S, Command Code Glyph Cluster Free, Mistral Small, and OpenCode Iceman Contributor Free.
+- `mistral-vibe`: browser PKCE login, account-scoped dynamic model discovery, and OpenAI-compatible transport for Vibe subscription models, including 1M-context GLM 5.3 Flash and Mistral Large 4.
 - `lazy-router`: `lazy/default`, `lazy/task` and `lazy/vision` virtual models that
   route each request to the first healthy (provider, credential) unit of a
   peak-aware route table, with explicit effort and `max_tokens`, probe-based
@@ -27,11 +80,40 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   interval (default 15 s) on every gateway event stream, plus
   `X-Accel-Buffering: no` / `Cache-Control: no-transform`. Gateway process only;
   off by default.
-- `lazy-router`: a route entry can fix its effort level (`"effort": "low"`). The
-  Command Code `minimax-m3.1-flash:free` entries think at `low`; its trait
-  correction marks it reasoning-capable (low/medium/high), and the attempt layer
-  writes `params.reasoning_effort` into the provider body, which the plugin would
-  otherwise drop.
+- `lazy-router`: route entries can fix an effort level, and the attempt layer can
+  translate that level into provider-specific request fields when needed.
+- `vendor-shims`: a provider plugin that streams through a standard api
+  (`openai-responses`, `openai-completions`) no longer dies when the host
+  exports no `streamSimple` for it (the gateway bundle exports none). The shim
+  issues one minimal call to the model's Provider API through the transport's
+  own fetch, so a `403 upgrade_required` reaches the transport and it falls back
+  to `/alpha/generate` as designed; any other answer still reports the missing
+  transport. Command Code `reflection/beam:free` works again on Go plans.
+- `lazy-router`: provider-plugin crashes and Qoder's reformatted quota codes now
+  cool the failing unit instead of probing it. Qoder answers 110/113/116/117/
+  118/119/122 as English `code N` after its plugin rewrites the error, and the
+  table only matched the Chinese `错误码 110`; plugin crashes such as
+  `e.content.length` would have been re-probed into the same crash. Both bench
+  at once and the request moves to the next unit.
+- `lazy-router`: rolling per-model serving performance. Every streamed answer —
+  routed or a direct model id — is measured for first-token latency (request to
+  the first event only the model can produce, not the gateway's own preamble)
+  and generation speed (the provider's own output-token total over the time
+  those tokens took), plus the average total request duration, which counts
+  every measured answer, streamed or delivered whole. Sums live in one-minute
+  buckets over a 30-minute window,
+  so a long answer weighs what it should and a fixed model recovers inside the
+  window. `GET /v1/lazy/status` exposes them as `perf`, the page shows two
+  three columns per route row plus a per-model table, and chat streams now ask for
+  `stream_options.include_usage` so the token totals exist to measure. A model
+  with more than 100 samples in the window and an average total duration above
+  10 s (`degradeMinSamples` / `degradeTotalMs`) is marked degraded: its rows
+  turn red, and the router tries every healthy unit in table order before any
+  degraded one. A prefix-affinity match still outranks the rule, so a warm prefix
+  keeps its unit even while that model is red. The verdict is latched for 30
+  minutes (`degradeHoldMs`), so a model near the ceiling cannot flap between the
+  two groups; after the period the window decides again and a still-slow model is
+  latched for another period.
 - `lib/credential-pin.js`: request-scoped credential pins that other features honour.
 - `models-bridge`: expose custom providers and models declared in `models.yml` to the
   auth-gateway reverse proxy, supplying credentials in memory and making them routable.
@@ -50,6 +132,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `lazy-router`: `mistral-vibe/zai-glm-5-3-flash` is the first medium-tier fallback in `lazy/default`; `xai-oauth/grok-4.7` is no longer routed by Lazy.
 - `lazy-router`: `ollama-cloud/glm-5.3-flash` now comes before
   `cline-pass/glm-5.3-flash` in `lazy/default`, so its slots fill first and the
   overflow goes to ClinePass.
@@ -71,6 +154,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `mistral-vibe`: replayed thinking matches the official Vibe CLI
+  `_message_payload`: `{type:"thinking", thinking:[{type:"text", text}]}` plus
+  a following text chunk. The CLI does not send `signature` or `closed`.
+- `mistral-vibe`: Responses and Messages no longer have their own item mapper.
+  OMP's `parseRequest` turns either dialect into its context, the existing
+  Mistral chat transport serves that context, and OMP's `encodeResponse` /
+  `encodeStream` write the caller's protocol back.
+- `lazy-router`: an OpenCode Go monthly usage limit (`GoUsageLimitError`,
+  including a 200 stream that only later emits the error) cools that unit at
+  once and the request moves to the next unit, instead of being returned
+  downstream.
+- `mistral-vibe`: the stock-host Mistral fallback drops the OpenAI `user`
+  field before calling Mistral, which rejects it with `422 extra_forbidden`.
+- `mistral-vibe`: preserve Mistral structured `thinking` content blocks by normalizing them to the OpenAI-compatible `reasoning_content` field before OMP parses chat completions, for both SSE and non-streaming JSON responses.
+- `plugin-bridge`: preload async provider plugins before OMP startup and synchronously override built-in providers before the first `ModelRegistry.getAll()`, so Command Code models such as `stealth/glyph-cluster:free` use the plugin `commandcode-custom` transport instead of a stale native provider.
 - `plugin-bridge`: a registry is populated once and again after each `refresh()`,
   instead of on every `getAll()`. The lazy-router catalog now also recognises the
   live registry from `getAvailable` and `registerProvider`, which it had relied on

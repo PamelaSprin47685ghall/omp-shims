@@ -15,7 +15,7 @@ const ACCOUNTS = [
   { id: 4, provider: "commandcode" },
   { id: 5, provider: "openai-codex", tier: "plus" },
   { id: 6, provider: "openai-codex", tier: "pro" },
-  { id: 7, provider: "xai-oauth" },
+  { id: 7, provider: "mistral-vibe" },
   { id: 8, provider: "charm-hyper" },
   { id: 9, provider: "google-antigravity", tier: "pro" },
   { id: 10, provider: "google-antigravity", tier: "pro" },
@@ -30,8 +30,9 @@ const ACCOUNTS = [
 const tierSource = (accounts, version = 1) => ({ version, ready: Promise.resolve(), accounts: () => accounts });
 const policy = new RoutePolicy(loadPolicyData());
 const units = new UnitDirectory({ tiers: tierSource(ACCOUNTS) });
-const order = (route, period, directory = units) =>
-  policy.candidates(route, period, directory).candidates.map((c) => `${c.unit.label} ${c.model}`);
+const TEST_NOW = new Date("2026-10-28T12:00:00+08:00");
+const order = (route, period, directory = units, at = TEST_NOW) =>
+  policy.candidates(route, period, directory, at).candidates.map((c) => `${c.unit.label} ${c.model}`);
 
 describe("bundled route tables", () => {
   test("the bundled tables name no accounts", () => {
@@ -41,71 +42,113 @@ describe("bundled route tables", () => {
     expect(text).not.toMatch(/@/);
   });
 
-  test("peak default follows the priority list, tiers in the listed order, accounts oldest first", () => {
-    expect(order("default", PERIOD.PEAK)).toEqual([
-      "openai-codex:plus#1 openai-codex/gpt-6.1-sol",
-      "kiro kiro/claude-opus-5-5",
-      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
-      "google-antigravity:ultra#1 google-antigravity/gemini-4-argon",
-      "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
-      "ollama-cloud ollama-cloud/glm-5.3-flash",
-      "cline-pass#1 cline-pass/glm-5.3-flash",
-      "cline-pass#2 cline-pass/glm-5.3-flash",
-      "qoder-cn qoder-cn/qwen3.8-flash",
-      "charm-hyper charm-hyper/qwen3.8-flash",
-      "xai-oauth xai-oauth/grok-4.7",
-      "ctyun ctyun/deepseek-v4-pro-0813-oc",
-      "nvidia nvidia/z-ai/glm-5.3-flash",
-    ]);
-  });
-
-  test("off-peak default is opencode-go first, then the whole peak list", () => {
-    const offPeak = order("default", PERIOD.OFF_PEAK);
-    expect(offPeak[0]).toBe("opencode-go opencode-go/deepseek-v4.1-flash");
-    expect(offPeak.slice(1)).toEqual(order("default", PERIOD.PEAK));
-  });
-
-  test("capped entries are exactly the codex, kiro and gemini-4 ones", () => {
-    const capped = policy
-      .candidates("default", PERIOD.PEAK, units)
-      .candidates.filter((c) => c.effort === "capped")
-      .map((c) => c.unit.label);
-    expect(capped).toEqual(["openai-codex:plus#1", "kiro", "google-antigravity:ultra#1", "openai-codex:pro#1"]);
-  });
-
-  test("task lists differ by period; gemini-3.8-flash drains Pro accounts before Ultra", () => {
-    expect(order("task", PERIOD.PEAK).slice(0, 5)).toEqual([
-      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
-      "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
-      "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
-      "google-antigravity:pro#3 google-antigravity/gemini-3.8-flash",
-      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
-    ]);
-    expect(order("task", PERIOD.OFF_PEAK).slice(0, 2)).toEqual([
-      "commandcode commandcode/minimax/minimax-m3.1-flash:free",
-      "ctyun ctyun/deepseek-v4-pro-0813-oc",
-    ]);
-  });
-
-  test("gemini-4 is served by Ultra accounts only, in every period", () => {
-    for (const period of [PERIOD.PEAK, PERIOD.OFF_PEAK]) {
-      const tiers = policy
-        .candidates("default", period, units)
-        .candidates.filter((c) => c.model.includes("gemini-4"))
-        .map((c) => c.unit.tier);
-      expect(tiers).toEqual(["ultra"]);
+  test("peak and off-peak expose identical candidates; periods are performance regimes only", () => {
+    for (const route of ["lazy/default", "lazy/task", "rush/default", "rush/task", "weak/default", "weak/task"]) {
+      expect(order(route, PERIOD.OFF_PEAK)).toEqual(order(route, PERIOD.PEAK));
     }
   });
 
-  test("vision derives from task and requires image input", () => {
-    const { candidates, require } = policy.candidates("vision", PERIOD.PEAK, units);
-    expect(require).toEqual(["text", "image"]);
-    expect(candidates).toEqual(policy.candidates("task", PERIOD.PEAK, units).candidates);
+  test("lazy/default is high-quality production work without Rush-reserved Terra or GLM Flash", () => {
+    const candidates = policy.candidates("lazy/default", PERIOD.PEAK, units, TEST_NOW).candidates;
+    expect(candidates.map((c) => c.model)).toEqual([
+      "google-antigravity/gemini-4-argon",
+      "google-antigravity/claude-opus-5-5",
+      "kiro/claude-opus-5-5",
+      "opencode-go/deepseek-v4.1-flash",
+      "ctyun/glm-5.3-oc",
+      "ctyun/deepseek-v4-pro-0813-oc",
+    ]);
+    expect(candidates.every((c) => typeof c.intelligence === "number" && c.cost > 0)).toBe(true);
+    expect(candidates.some((c) => c.model.includes("gpt-6.1-terra"))).toBe(false);
+    expect(candidates.some((c) => c.model.includes("glm-5.3-flash"))).toBe(false);
   });
 
-  test("routeFor accepts only lazy models with a table", () => {
-    expect(policy.routeFor("lazy/task")).toBe("task");
-    expect(policy.routeFor("lazy/nope")).toBeUndefined();
+  test("lazy/task uses Gemini Pro, never Ultra, and keeps Rush capacity out of the ordinary pool", () => {
+    const candidates = policy.candidates("lazy/task", PERIOD.PEAK, units, TEST_NOW).candidates;
+    const gemini = candidates.filter((c) => c.model === "google-antigravity/gemini-3.8-flash");
+    expect(gemini.map((c) => c.unit.tier)).toEqual(["pro", "pro", "pro"]);
+    expect(candidates.some((c) => c.model === "mistral-vibe/zai-glm-5-3-flash")).toBe(false);
+    expect(candidates.some((c) => c.model === "cline-pass/glm-5.3-flash")).toBe(false);
+    expect(candidates.some((c) => c.model === "ollama-cloud/glm-5.3-flash")).toBe(false);
+  });
+
+  test("Qoder DeepSeek Flash is a temporary zero-cost-like task candidate through October", () => {
+    const active = new Date("2026-10-31T23:59:59+08:00");
+    const expired = new Date("2026-11-01T00:00:00+08:00");
+    const live = policy.candidates("lazy/task", PERIOD.PEAK, units, active).candidates.filter((c) => c.model === "qoder-cn/deepseek-v4-flash");
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({ effort: "max", intelligence: 59, cost: 0.01 });
+    expect(policy.candidates("lazy/task", PERIOD.PEAK, units, expired).candidates.some((c) => c.model === "qoder-cn/deepseek-v4-flash")).toBe(false);
+  });
+
+  test("rush/default is strict Terra medium: Plus first, then Pro", () => {
+    expect(policy.selectionOf("rush/default")).toBe("ordered");
+    const candidates = policy.candidates("rush/default", PERIOD.PEAK, units).candidates;
+    expect(candidates.map((c) => [c.unit.label, c.model, c.effort])).toEqual([
+      ["openai-codex:plus#1", "openai-codex/gpt-6.1-terra", "medium"],
+      ["openai-codex:pro#1", "openai-codex/gpt-6.1-terra", "medium"],
+    ]);
+  });
+
+  test("rush/task uses Mistral DeepSeek first; rush/vision keeps its GLM Flash lane", () => {
+    const backup = [
+      "cline-pass#1 cline-pass/glm-5.3-flash",
+      "cline-pass#2 cline-pass/glm-5.3-flash",
+      "ollama-cloud ollama-cloud/glm-5.3-flash",
+    ];
+    expect(policy.selectionOf("rush/task")).toBe("ordered");
+    expect(order("rush/task", PERIOD.PEAK)).toEqual([
+      "mistral-vibe mistral-vibe/deepseek-v4-1-flash-1017",
+      ...backup,
+    ]);
+    expect(order("rush/task", PERIOD.OFF_PEAK)).toEqual(order("rush/task", PERIOD.PEAK));
+    const task = policy.candidates("rush/task", PERIOD.PEAK, units, TEST_NOW);
+    expect(task.candidates[0]).toMatchObject({
+      effort: "max",
+      intelligence: 59,
+      cost: 0.04,
+    });
+    const expectedVision = ["mistral-vibe mistral-vibe/zai-glm-5-3-flash", ...backup];
+    const vision = policy.candidates("rush/vision", PERIOD.PEAK, units, TEST_NOW);
+    expect(vision.require).toEqual(["text", "image"]);
+    expect(vision.candidates.map((c) => c.unit.label + " " + c.model)).toEqual(expectedVision);
+    expect(order("rush/vision", PERIOD.OFF_PEAK)).toEqual(expectedVision);
+    expect(vision.candidates.every((c) => c.effort === "max")).toBe(true);
+  });
+
+  test("weak is an independent coordinator/worker family and does not advertise untested vision", () => {
+    expect(policy.selectionOf("weak/default")).toBe("ordered");
+    expect(order("weak/default", PERIOD.PEAK)).toEqual([
+      "ctyun ctyun/glm-5.3-oc",
+      "ctyun ctyun/deepseek-v4-pro-0813-oc",
+    ]);
+    expect(order("weak/task", PERIOD.PEAK)).toEqual([
+      "commandcode commandcode/poolside/laguna-s-2.1-free",
+      "commandcode commandcode/stealth/glyph-cluster:free",
+      "mistral-vibe mistral-vibe/mistral-small-latest",
+      "opencode-go opencode-go/iceman-contributor-free",
+    ]);
+    expect(policy.routeFor("weak/vision")).toBeUndefined();
+    expect(policy.routeFor("lazy/weak")).toBeUndefined();
+    expect(policy.contextWindowOf("weak/task")).toBe(250000);
+    expect(policy.maxOutputTokensOf("weak/task")).toBe(32768);
+  });
+
+  test("lazy/vision derives from task, requires images, and appends Argon Ultra as a durable fallback", () => {
+    const { candidates, require } = policy.candidates("lazy/vision", PERIOD.PEAK, units, TEST_NOW);
+    const task = policy.candidates("lazy/task", PERIOD.PEAK, units, TEST_NOW).candidates;
+    expect(require).toEqual(["text", "image"]);
+    expect(candidates.slice(0, task.length)).toEqual(task);
+    expect(candidates.at(-1)).toMatchObject({ model: "google-antigravity/gemini-4-argon", intelligence: 63.1, effort: "medium" });
+    expect(candidates.at(-1).unit.tier).toBe("ultra");
+  });
+
+  test("routeFor accepts all configured virtual families and rejects direct/unknown ids", () => {
+    for (const id of ["lazy/default", "lazy/task", "lazy/vision", "rush/default", "rush/task", "rush/vision", "weak/default", "weak/task"]) {
+      expect(policy.routeFor(id)).toBe(id);
+      expect(policy.modelIdOf(id)).toBe(id);
+    }
+    expect(policy.routeFor("weak/vision")).toBeUndefined();
     expect(policy.routeFor("kiro/claude-opus-5-5")).toBeUndefined();
   });
 });
@@ -113,8 +156,9 @@ describe("bundled route tables", () => {
 describe("concurrency limits", () => {
   const unit = (provider, tier) => ({ provider, tier, key: provider, label: provider });
 
-  test("only ollama-cloud is limited, three requests per key", () => {
+  test("ollama-cloud and charm-hyper have measured safe limits", () => {
     expect(policy.maxInFlight(unit("ollama-cloud"))).toBe(3);
+    expect(policy.maxInFlight(unit("charm-hyper"))).toBe(2);
     for (const provider of ["cline-pass", "openai-codex", "kiro", "commandcode", "google-antigravity", "nvidia"]) {
       expect(policy.maxInFlight(unit(provider, "pro"))).toBe(0);
     }
@@ -139,30 +183,14 @@ describe("concurrency limits", () => {
 });
 
 describe("fixed effort levels", () => {
-  test("commandcode minimax thinks at low effort wherever it is listed", () => {
-    const efforts = [
-      ["default", PERIOD.PEAK],
-      ["default", PERIOD.OFF_PEAK],
-      ["task", PERIOD.PEAK],
-      ["task", PERIOD.OFF_PEAK],
-    ].flatMap(([route, period]) =>
-      policy
-        .candidates(route, period, units)
-        .candidates.filter((c) => c.model === "commandcode/minimax/minimax-m3.1-flash:free")
-        .map((c) => c.effort),
-    );
-    expect(efforts).toEqual(["low", "low", "low", "low"]);
-  });
-
-  test("the minimax trait correction records the levels the endpoint accepts", () => {
-    const traits = policy.modelTraits["commandcode/minimax/minimax-m3.1-flash:free"];
-    expect(traits.reasoning).toBe(true);
-    expect(traits.efforts).toEqual(["low", "medium", "high"]);
+  test("the Qoder trait correction records only effort levels its endpoint accepts", () => {
+    const traits = policy.modelTraits["qoder-cn/qwen3.8-flash"];
+    expect(traits.efforts).toEqual(["low", "medium"]);
   });
 
   test("an unknown effort is rejected when the table loads", () => {
     const data = loadPolicyData();
-    data.routes.task.periods.peak = [{ model: "commandcode/minimax/minimax-m3.1-flash:free", effort: "turbo" }];
+    data.routes["lazy/task"].periods.peak = [{ model: "qoder-cn/qwen3.8-flash", effort: "turbo" }];
     expect(() => new RoutePolicy(data).candidates("task", PERIOD.PEAK, units)).toThrow(/unknown effort "turbo"/);
   });
 });
@@ -170,38 +198,37 @@ describe("fixed effort levels", () => {
 describe("runtime expansion", () => {
   test("a newly added account joins its tier without any table change", () => {
     const more = [...ACCOUNTS, { id: 17, provider: "openai-codex", tier: "plus" }];
-    const codex = order("default", PERIOD.PEAK, new UnitDirectory({ tiers: tierSource(more, 2) })).filter((line) =>
+    const codex = order("rush/default", PERIOD.PEAK, new UnitDirectory({ tiers: tierSource(more, 2) })).filter((line) =>
       line.startsWith("openai-codex"),
     );
     expect(codex).toEqual([
-      "openai-codex:plus#1 openai-codex/gpt-6.1-sol",
-      "openai-codex:plus#2 openai-codex/gpt-6.1-sol",
-      "openai-codex:pro#1 openai-codex/gpt-6.1-sol",
+      "openai-codex:plus#1 openai-codex/gpt-6.1-terra",
+      "openai-codex:plus#2 openai-codex/gpt-6.1-terra",
+      "openai-codex:pro#1 openai-codex/gpt-6.1-terra",
     ]);
   });
 
   test("an account with an unknown tier is matched only by entries without a tier", () => {
     const unknown = ACCOUNTS.map((a) => (a.id === 9 ? { id: 9, provider: a.provider } : a));
     const directory = new UnitDirectory({ tiers: tierSource(unknown) });
-    expect(order("default", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-4"))).not.toContain(
+    expect(order("lazy/default", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-4"))).not.toContain(
       "google-antigravity#1 google-antigravity/gemini-4-argon",
     );
-    expect(order("task", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-3.8"))).toEqual([
+    expect(order("lazy/task", PERIOD.PEAK, directory).filter((l) => l.includes("gemini-3.8"))).toEqual([
       "google-antigravity:pro#1 google-antigravity/gemini-3.8-flash",
       "google-antigravity:pro#2 google-antigravity/gemini-3.8-flash",
-      "google-antigravity:ultra#1 google-antigravity/gemini-3.8-flash",
     ]);
   });
 
   test("expansions are cached per unit version", () => {
     const tiers = tierSource(ACCOUNTS);
     const directory = new UnitDirectory({ tiers });
-    const first = policy.candidates("default", PERIOD.PEAK, directory).candidates;
-    expect(policy.candidates("default", PERIOD.PEAK, directory).candidates).toBe(first);
+    const first = policy.candidates("rush/default", PERIOD.PEAK, directory).candidates;
+    expect(policy.candidates("rush/default", PERIOD.PEAK, directory).candidates).toBe(first);
     tiers.version = 2;
     tiers.accounts = () => ACCOUNTS.filter((a) => a.id !== 5);
-    const next = order("default", PERIOD.PEAK, directory);
-    expect(next[0]).toBe("kiro kiro/claude-opus-5-5");
+    const next = order("rush/default", PERIOD.PEAK, directory);
+    expect(next[0]).toEndWith(" openai-codex/gpt-6.1-terra");
   });
 });
 
@@ -221,6 +248,20 @@ describe("validation", () => {
     const empty = base();
     empty.routes.r.periods.peak[0].tier = [];
     expect(() => new RoutePolicy(empty)).toThrow(/tier/);
+  });
+
+  test("route-level context and output limits must be positive integers", () => {
+    for (const [field, value] of [["contextWindow", 0], ["contextWindow", 1.5], ["maxOutputTokens", -1]]) {
+      const data = base();
+      data.routes.r[field] = value;
+      expect(() => new RoutePolicy(data)).toThrow(new RegExp(field));
+    }
+  });
+
+  test("invalid activeUntil timestamps are rejected", () => {
+    const data = base();
+    data.routes.r.periods.peak[0].activeUntil = "not-a-date";
+    expect(() => new RoutePolicy(data)).toThrow(/activeUntil/);
   });
 
   test("sameAs cycles are rejected at load time", () => {

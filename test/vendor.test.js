@@ -35,6 +35,29 @@ describe("@earendil-works/pi-ai shim", () => {
     const stream = streamSimple({ api: "nothing-registered" });
     await expect(stream.result()).rejects.toThrow('No transport registered for api "nothing-registered"');
   });
+
+  test("a hostless standard api probes for the plan answer the transport needs", async () => {
+    setHostStream(null);
+    const model = { api: "openai-responses", id: "reflection/beam:free", baseUrl: "https://example.test/provider/v1" };
+    const seen = [];
+    const fetchStatus = (status) => async (url, init) => {
+      seen.push({ url: String(url), auth: init.headers.authorization, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ error: { code: "upgrade_required" } }), { status });
+    };
+
+    // 403: end without events so the provider's transport falls back on its own.
+    const upgraded = streamSimple(model, {}, { apiKey: "user_test", fetch: fetchStatus(403) });
+    const events = [];
+    for await (const event of upgraded) events.push(event);
+    expect(events).toEqual([]);
+    expect(seen[0].url).toBe("https://example.test/provider/v1/responses");
+    expect(seen[0].auth).toBe("Bearer user_test");
+    expect(seen[0].body.model).toBe("reflection/beam:free");
+
+    // Anything else: the host genuinely has no stream for this api.
+    const unavailable = streamSimple(model, {}, { apiKey: "user_test", fetch: fetchStatus(200) });
+    await expect(unavailable.result()).rejects.toThrow('No transport registered for api "openai-responses"');
+  });
 });
 
 test("getAgentDir honours overrides and defaults to ~/.omp/agent", () => {

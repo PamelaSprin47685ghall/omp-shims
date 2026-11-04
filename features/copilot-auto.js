@@ -135,6 +135,11 @@ function installInboundHook() {
               try {
                 const data = await response.clone().json();
                 if (data && Array.isArray(data.data)) {
+                  // The Lazy Router already filtered this authenticated model
+                  // listing to its public allowlist. Never append concrete
+                  // Copilot models after that final client-facing decision.
+                  if (data.data.length > 0 && data.data.every((m) =>
+                    typeof m?.id === "string" && m.id.startsWith("lazy/"))) return response;
                   const existingIds = new Set(data.data.map((m) => m.id));
                   for (const entry of AUTO_MODEL_ENTRIES) {
                     if (!existingIds.has(entry.id)) {
@@ -160,7 +165,9 @@ function installInboundHook() {
               url.pathname === "/v1/responses")
           ) {
             const bodyText = await readBody(request);
-            if (bodyText) {
+            // Only the auto alias needs negotiation; skip the parse for every
+            // other model's multi-megabyte transcript.
+            if (bodyText && bodyText.includes("auto")) {
               try {
                 const parsed = JSON.parse(bodyText);
                 if (parsed && typeof parsed.model === "string" && isAutoModel(parsed.model)) {

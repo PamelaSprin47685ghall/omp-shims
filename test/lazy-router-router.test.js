@@ -6,7 +6,7 @@ import { FaultInjector } from "../lib/lazy-router/faults.js";
 import { FORMATS } from "../lib/lazy-router/formats.js";
 import { HealthRegistry } from "../lib/lazy-router/health.js";
 import { RoutePolicy } from "../lib/lazy-router/policy.js";
-import { LazyRouter, SERVED_BY_HEADERS } from "../lib/lazy-router/router.js";
+import { LazyRouter, qoderCapacityProbeOptions, SERVED_BY_HEADERS } from "../lib/lazy-router/router.js";
 import { UnitDirectory } from "../lib/lazy-router/units.js";
 
 const CHAT = FORMATS["/v1/chat/completions"];
@@ -44,6 +44,36 @@ const CATALOG = {
     canDisable: false,
     baseUrl: "https://p.example/v1",
   },
+  "ctyun/text": {
+    ref: "ctyun/text",
+    provider: "ctyun",
+    contextWindow: 1_000_000,
+    input: ["text"],
+    reasoning: false,
+    efforts: [],
+    canDisable: false,
+    baseUrl: "https://ctyun.example/v1",
+  },
+  "mistral-vibe/deepseek-v4-1-flash-1017": {
+    ref: "mistral-vibe/deepseek-v4-1-flash-1017",
+    provider: "mistral-vibe",
+    contextWindow: 1_000_000,
+    input: ["text"],
+    reasoning: false,
+    efforts: [],
+    canDisable: false,
+    baseUrl: "https://mistral-vibe.example/v1",
+  },
+  "p/quarter": {
+    ref: "p/quarter",
+    provider: "p",
+    contextWindow: 300_000,
+    input: ["text"],
+    reasoning: false,
+    efforts: [],
+    canDisable: false,
+    baseUrl: "https://q.example/v1",
+  },
   "q/text": {
     ref: "q/text",
     provider: "q",
@@ -61,7 +91,8 @@ const CATALOG = {
  * real attempt layer, and answers like the auth-gateway does (502 on upstream
  * errors; a 200 event stream opened before upstream answers when streaming).
  */
-function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
+function harness({ upstream, faults = {}, bypass, policy = POLICY,
+  clientModel = "lazy/default" }) {
   const events = [];
   const emit = (event, detail = {}) => events.push({ event, ...detail });
   const timers = [];
@@ -129,7 +160,7 @@ function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
       await response.text();
       if (!response.ok)
         return Response.json({ error: { message: "upstream", type: "upstream_error" } }, { status: 502 });
-      return Response.json({ served: body.model });
+      return Response.json({ served: body.model, model: body.model });
     } catch {
       return Response.json({ error: { message: "aborted" } }, { status: 502 });
     }
@@ -147,6 +178,7 @@ function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
     faults: new FaultInjector(faults),
     emit,
     settings: {
+      routing: { temperature: 0 },
       probePrompt: "Reply OK",
       probeMaxTokens: 32,
       probeTimeoutMs: 2_000,
@@ -157,7 +189,7 @@ function harness({ upstream, faults = {}, bypass, policy = POLICY }) {
   });
 
   const send = (body, { signal } = {}) => {
-    const full = { model: "lazy/default", messages: [{ role: "user", content: "hi" }], ...body };
+    const full = { model: clientModel, messages: [{ role: "user", content: "hi" }], ...body };
     const request = new Request("http://gateway.test/v1/chat/completions", {
       method: "POST",
       headers: { authorization: "Bearer client" },
@@ -179,6 +211,8 @@ describe("LazyRouter", () => {
     const response = await h.send({ reasoning_effort: "high", max_tokens: 100 });
     expect(response.status).toBe(200);
     expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#1");
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("p/big");
+    expect((await response.clone().json()).model).toBe("lazy/default");
     expect(h.calls).toHaveLength(1);
     expect(h.calls[0].auth).toBe("Bearer tok-1");
     expect(h.calls[0].body).toMatchObject({ model: "p/big", reasoning_effort: "medium", max_completion_tokens: 64000 });
@@ -223,6 +257,98 @@ describe("LazyRouter", () => {
     expect(h.names().at(-1)).toBe("exhausted");
   });
 
+  test("Mistral temporary 429 does not probe immediately; 30s background probe restores it", async () => {
+    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const custom = {
+      ...POLICY,
+      routes: { default: {
+        selection: "ordered",
+        input: ["text"],
+        periods: { peak: [{ model }, { model: "q/text" }] },
+      } },
+    };
+    let throttled = true;
+    const h = harness({ policy: custom, upstream: (call) =>
+      call.unit === "mistral-vibe" && throttled
+        ? new Response('{"error":"Too Many Requests"}', { status: 429 })
+        : ok(),
+    });
+    const first = await h.send({});
+    expect(first.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
+    expect(h.calls.map((c) => c.unit)).toEqual(["mistral-vibe", "q"]);
+    expect(h.names()).not.toContain("probe");
+    const cooled = h.health.entry("mistral-vibe " + model);
+    expect(cooled).toBeDefined();
+    expect(cooled.reason).toContain("throttle:");
+    expect(cooled.probeIntervalMs).toBe(30_000);
+    expect(cooled.nextProbeAt - cooled.since).toBe(30_000);
+
+    throttled = false;
+    await h.timers[0]();
+    expect(h.health.isAlive("mistral-vibe " + model)).toBe(true);
+    const restored = await h.send({});
+    expect(restored.headers.get(SERVED_BY_HEADERS.model)).toBe(model);
+    expect(h.names()).toContain("cooldown-exit");
+  });
+
+  test("Mistral upstream 503 cools 30 seconds, skips immediate probe, then restores", async () => {
+    const model = "mistral-vibe/deepseek-v4-1-flash-1017";
+    const custom = { ...POLICY, routes: { default: {
+      selection: "ordered", input: ["text"],
+      periods: { peak: [{ model }, { model: "q/text" }] },
+    } } };
+    let unavailable = true;
+    const h = harness({ policy: custom, upstream: (call) =>
+      call.unit === "mistral-vibe" && unavailable
+        ? new Response('{"error":"Service Unavailable"}', { status: 503 })
+        : ok(),
+    });
+    const first = await h.send({});
+    expect(first.status).toBe(200);
+    expect(first.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
+    expect(h.calls.map(c => c.unit)).toEqual(["mistral-vibe", "q"]);
+    expect(h.names()).not.toContain("probe");
+    const cooled = h.health.entry("mistral-vibe " + model);
+    expect(cooled).toBeDefined();
+    expect(cooled.probeIntervalMs).toBe(30_000);
+    expect(cooled.nextProbeAt - cooled.since).toBe(30_000);
+    expect(cooled.reason).toContain("transient:");
+    unavailable = false;
+    await h.timers[0]();
+    expect(h.health.isAlive("mistral-vibe " + model)).toBe(true);
+  });
+
+  test("quota 429 and ambiguous errors use exact 30-minute probes", async () => {
+    for (const [code, error] of [
+      [429, '{"error":"insufficient_quota"}'],
+      [418, '{"error":"unknown failure"}'],
+    ]) {
+      const h = harness({ upstream: (call) =>
+        call.unit === "p:gold#1" ? new Response(error, { status: code }) : ok(),
+      });
+      const response = await h.send({});
+      expect(response.status).toBe(200);
+      const cooled = h.health.entry("p/1 p/big");
+      expect(cooled).toBeDefined();
+      expect(cooled.probeIntervalMs).toBe(1_800_000);
+      expect(cooled.nextProbeAt - cooled.since).toBe(1_800_000);
+      expect(cooled.reason.includes("transient:")).toBe(false);
+    }
+  });
+
+  test("a failed background probe stays quiet while remaining scheduled", async () => {
+    const h = harness({ upstream: (call) => (call.unit === "p:gold#1" ? quota() : ok()) });
+    await h.send({});
+    expect(h.health.isAlive("p/1 p/big")).toBe(false);
+    const beforeEvents = h.names().length;
+    const beforeTimers = h.timers.length;
+    await h.timers[0]();
+    expect(h.names().slice(beforeEvents)).toEqual([]);
+    expect(h.health.isAlive("p/1 p/big")).toBe(false);
+    expect(h.timers.length).toBe(beforeTimers + 1);
+    expect(h.health.entry("p/1 p/big")?.probes).toBe(1);
+  });
+
   test("a background probe restores the unit and traffic returns to it", async () => {
     let healthy = false;
     const h = harness({ upstream: (call) => (call.unit !== "p:gold#1" || healthy ? ok() : quota()) });
@@ -243,6 +369,33 @@ describe("LazyRouter", () => {
     const text = await response.text();
     expect(text).toContain('"role":"assistant"');
     expect(text).toContain('"OK"');
+  });
+
+  test("CTYun Coding Plan quota text fails over to the next provider instead of reaching the client", async () => {
+    const policy = {
+      ...POLICY,
+      routes: {
+        default: { input: ["text"], periods: { peak: [{ model: "ctyun/text" }, { model: "q/text" }] } },
+      },
+    };
+    const h = harness({
+      policy,
+      upstream: ok,
+      bypass: (body) =>
+        body.model === "ctyun/text"
+          ? { choices: [{ delta: { content: "您的Coding Plan套餐的额度已用完！\n请等待周期时间刷新" } }] }
+          : { choices: [{ delta: { content: "OK" } }] },
+    });
+    const response = await h.send({ stream: true });
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
+    const text = await response.text();
+    expect(text).toContain("OK");
+    expect(text).not.toContain("周期时间刷新");
+    expect(h.events.find((event) => event.event === "attempt-failed")).toMatchObject({
+      model: "ctyun/text",
+      failure: "quota",
+    });
   });
 
   test("without a provider verdict the first answering event decides, and the pin is reported unverified", async () => {
@@ -341,6 +494,57 @@ describe("LazyRouter", () => {
     ]);
   });
 
+  test("Qoder hard capacity rechecks after one minute and backs off to the normal interval", async () => {
+    const candidate = { unit: { provider: "qoder-cn" } };
+    const options = qoderCapacityProbeOptions(
+      candidate,
+      { message: "[Qoder CN 无可用容量] serviceAvailable:false（子码 RESOURCE_LIMIT，优先级通道 p3）" },
+      1_800_000,
+    );
+    expect(options).toEqual({
+      probeIntervalMs: 60_000,
+      probeBackoff: 2,
+      maxProbeIntervalMs: 1_800_000,
+    });
+
+    const timers = [];
+    const health = new HealthRegistry({
+      probeIntervalMs: 1_800_000,
+      prober: async () => false,
+      setTimer: (fn, ms) => {
+        const timer = { fn, ms };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimer: () => {},
+    });
+    health.markDead("q", "quota", candidate, options);
+    expect(timers.map((timer) => timer.ms)).toEqual([60_000]);
+    for (const expected of [120_000, 240_000, 480_000, 960_000, 1_800_000, 1_800_000]) {
+      await timers.at(-1).fn();
+      expect(timers.at(-1).ms).toBe(expected);
+    }
+    expect(health.entry("q")?.probes).toBe(6);
+  });
+
+  test("Qoder daily quota does not use the transient hard-capacity schedule", () => {
+    const candidate = { unit: { provider: "qoder-cn" } };
+    expect(
+      qoderCapacityProbeOptions(
+        candidate,
+        { message: "[Qoder CN 额度限制] Billing daily count exceeded, 错误码 110" },
+        1_800_000,
+      ),
+    ).toBeUndefined();
+    expect(
+      qoderCapacityProbeOptions(
+        { unit: { provider: "google-antigravity" } },
+        { message: "serviceAvailable:false RESOURCE_LIMIT" },
+        1_800_000,
+      ),
+    ).toBeUndefined();
+  });
+
   test("an exhausted quota benches the unit without a probe and fails over within the request", async () => {
     const exhausted = () =>
       new Response(
@@ -374,12 +578,133 @@ describe("LazyRouter", () => {
     expect(h.names()).not.toContain("cooldown-enter");
   });
 
+  test("Cloud Code empty-contents 400 is a request rejection, not an unhealthy account", async () => {
+    const invalidContents = () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 400,
+            message: "* GenerateContentRequest.contents: contents is not specified\n",
+            status: "INVALID_ARGUMENT",
+          },
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    const h = harness({ upstream: invalidContents });
+    const response = await h.send({});
+    expect(response.status).toBe(400);
+    expect(h.calls).toHaveLength(1);
+    expect(h.names()).toEqual(["route", "rejected"]);
+    expect(h.names()).not.toContain("probe");
+    expect(h.names()).not.toContain("cooldown-enter");
+    expect(h.health.isAlive("p/1 p/big")).toBe(true);
+  });
+
+  test("a provider 400 is request-scoped: skip duplicate accounts, do not probe/cool, and try another model", async () => {
+    const invalid = () => new Response(
+      JSON.stringify({ error: { message: "Invalid input. Please review your request before trying again.", type: "invalid_request_error" } }),
+      { status: 400 },
+    );
+    const h = harness({ upstream: (call) => (call.body.model === "p/big" ? invalid() : ok()) });
+    const response = await h.send({});
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("q");
+    expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#1", "q"]);
+    expect(h.events.filter((e) => e.event === "attempt-failed").map((e) => e.failure)).toEqual(["request"]);
+    expect(h.names()).not.toContain("probe");
+    expect(h.names()).not.toContain("cooldown-enter");
+    expect(h.health.isAlive("p/1 p/big")).toBe(true);
+  });
+
+  test("a context-limit 400 skips models whose advertised window cannot clear the discovered requirement", async () => {
+    const tooLong = () => new Response(
+      JSON.stringify({ error: { message: "The input token count exceeds the maximum number of tokens allowed (1048576)." } }),
+      { status: 400 },
+    );
+    const h = harness({ upstream: (call) => (call.body.model === "p/big" ? tooLong() : ok()) });
+    const response = await h.send({});
+    expect(response.status).toBe(400);
+    expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#1"]);
+    expect(h.names()).toEqual(["route", "attempt-failed", "skip", "exhausted"]);
+    expect(h.names()).not.toContain("probe");
+    expect(h.names()).not.toContain("cooldown-enter");
+    const body = await response.json();
+    expect(body.error.type).toBe("invalid_request_error");
+    expect(body.error.message).toContain("1048576");
+  });
+
+  test("a stream 502 wrapping upstream invalid_parameter_error is restored to request semantics", async () => {
+    const h = harness({
+      upstream: ok,
+      bypass: (body) =>
+        body.model === "p/big"
+          ? { error: { message: 'Upstream status 400: {"code":"provider_error","details":"invalid_parameter_error"}' } }
+          : { choices: [{ delta: { content: "OK" } }] },
+    });
+    const response = await h.send({ stream: true });
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("q");
+    expect(h.events.filter((e) => e.event === "route").map((e) => e.unit)).toEqual(["p:gold#1", "q"]);
+    expect(h.events.filter((e) => e.event === "attempt-failed").map((e) => [e.failure, e.status, e.source])).toEqual([
+      ["request", 502, "stream"],
+    ]);
+    expect(h.names()).not.toContain("probe");
+    expect(h.names()).not.toContain("cooldown-enter");
+  });
+
   test("injected faults fail the attempt without reaching the provider", async () => {
     const h = harness({ upstream: ok, faults: { "p:gold#1": { requests: 1, probes: 1 } } });
     const response = await h.send({});
     expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#2");
     expect(h.calls.map((c) => c.unit)).toEqual(["p:gold#2"]);
     expect(h.events.find((e) => e.event === "attempt-failed").source).toBe("injected");
+  });
+
+  test("expired route entries disappear from routing and status at the same instant", async () => {
+    const policy = {
+      ...POLICY,
+      routes: {
+        default: {
+          input: ["text"],
+          periods: {
+            peak: [
+              { model: "q/text", activeUntil: "2026-11-01T00:00:00+08:00" },
+              { model: "p/big", tier: "gold" },
+            ],
+          },
+        },
+      },
+    };
+    const h = harness({ upstream: ok, policy });
+    h.router.now = () => new Date("2026-11-01T00:00:00+08:00");
+    const response = await h.send({});
+    expect(response.headers.get(SERVED_BY_HEADERS.unit)).toBe("p:gold#1");
+    const view = await h.router.status().json();
+    expect(view.routes.default.some((row) => row.model === "q/text")).toBe(false);
+  });
+
+  test("a route-specific context/output contract is advertised and used without weakening default", async () => {
+    const policy = {
+      ...POLICY,
+      routes: {
+        ...POLICY.routes,
+        weak: {
+          contextWindow: 250000,
+          maxOutputTokens: 32768,
+          input: ["text"],
+          periods: { peak: [{ model: "p/quarter", tier: "gold" }] },
+        },
+      },
+    };
+    const h = harness({ upstream: ok, policy });
+    const weak = h.router.advertisedModels().find((model) => model.id === "lazy/weak");
+    expect(weak).toMatchObject({ context_length: 250000, max_output_tokens: 32768, input_modalities: ["text"] });
+    const response = await h.send({ model: "lazy/weak", max_tokens: 1 });
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("p/quarter");
+    expect(h.calls.at(-1).body).toMatchObject({ model: "p/quarter", max_completion_tokens: 32768 });
+    const advertisedDefault = h.router.advertisedModels().find((model) => model.id === "lazy/default");
+    expect(advertisedDefault).toMatchObject({ context_length: 500000, max_output_tokens: 64000 });
   });
 
   test("advertised models", () => {
@@ -524,6 +849,79 @@ describe("prefix affinity and capacity", () => {
     expect(inFlight(h)).toEqual([0, 0]);
   });
 
+  test("lazy/task rescues healthy idle limited units rejected only by cache admission", async () => {
+    const policy = {
+      ...LIMITED,
+      routes: { ...POLICY.routes,
+        task: { input: ["text"], periods: {
+          peak: [{ model: "p/big", tier: "gold" }],
+        } },
+      },
+    };
+    const h = harness({ policy, clientModel: "lazy/task", upstream: ok });
+    const units = h.router.units.select("p");
+    expect(units).toHaveLength(2);
+    // A warm 5-minute window rejects a new uncached prompt on both units.
+    for (const unit of units) {
+      h.router.admission.evaluate(unit.key, 0.95, 1);
+    }
+    const response = await h.send({});
+    expect(response.status).toBe(200);
+    expect(servedBy(response)).toBe("p:gold#1");
+    expect(h.calls).toHaveLength(1);
+    expect(h.events.filter(e => e.event === "held-back" &&
+      e.reason === "admission")).toHaveLength(2);
+    expect(h.events.filter(e => e.event === "admission-rescue")).toHaveLength(1);
+    expect(h.names()).not.toContain("exhausted");
+    await response.text();
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("lazy/task rescue never exceeds hard maxInFlight, even when all units are healthy", async () => {
+    const policy = {
+      ...LIMITED,
+      routes: { ...POLICY.routes,
+        task: { input: ["text"], periods: {
+          peak: [{ model: "p/big", tier: "gold" }],
+        } },
+      },
+    };
+    const h = harness({ policy, clientModel: "lazy/task", upstream: ok });
+    const slots = h.router.units.select("p").map(unit => h.router.capacity.slot(unit));
+    try {
+      const response = await h.send({});
+      expect(response.status).toBe(503);
+      expect(h.calls).toHaveLength(0);
+      expect(h.names()).not.toContain("admission-rescue");
+      expect(inFlight(h)).toEqual([1, 1]);
+    } finally {
+      for (const slot of slots) slot.releaseAll();
+    }
+    expect(inFlight(h)).toEqual([0, 0]);
+  });
+
+  test("lazy/task rescue tries another idle unit if the first one fails upstream", async () => {
+    const policy = {
+      ...LIMITED,
+      routes: { ...POLICY.routes,
+        task: { input: ["text"], periods: {
+          peak: [{ model: "p/big", tier: "gold" }],
+        } },
+      },
+    };
+    const h = harness({
+      policy, clientModel: "lazy/task",
+      upstream: call => call.unit === "p:gold#1" ? quota() : ok(),
+    });
+    const units = h.router.units.select("p");
+    for (const unit of units) h.router.admission.evaluate(unit.key, 0.95, 1);
+    const response = await h.send({});
+    expect(response.status).toBe(200);
+    expect(servedBy(response)).toBe("p:gold#2");
+    expect(h.events.filter(e => e.event === "admission-rescue")).toHaveLength(2);
+    expect(h.names()).toContain("cooldown-enter");
+  });
+
   test("the status view shows load for limited units only, and the affinity counters", async () => {
     const h = harness({ policy: LIMITED, upstream: ok });
     await h.send(conversation("one"));
@@ -563,4 +961,29 @@ test("broker block reports are re-pointed at the pinned credential of the same p
   expect(attributeToPin("http://127.0.0.1:8765/v1/credential/1/refresh", attempt, credentials)).toBe(
     "http://127.0.0.1:8765/v1/credential/1/refresh",
   );
+});
+
+
+describe("ordered dedicated routes", () => {
+  test("table order overrides intelligence and cost scoring", async () => {
+    const policy = {
+      contextWindow: 500000,
+      maxOutputTokens: 64000,
+      peakWindows: [],
+      routes: {
+        default: {
+          selection: "ordered",
+          input: ["text"],
+          periods: { peak: [
+            { model: "q/text", intelligence: 10, cost: 10 },
+            { model: "p/big", tier: "gold", intelligence: 90, cost: 0.01 },
+          ] },
+        },
+      },
+    };
+    const h = harness({ upstream: ok, policy });
+    const response = await h.send({});
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("q/text");
+    expect(h.calls[0].body.model).toBe("q/text");
+  });
 });
