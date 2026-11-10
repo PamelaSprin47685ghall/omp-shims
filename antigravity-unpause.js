@@ -28,6 +28,28 @@ const PROVIDER = "google-antigravity";
 const CHUNKS_DIR = "/$bunfs/root/chunks";
 const SOURCE_ID = "omp-shims:antigravity-unpause";
 
+/**
+ * Build the `apiKey` the Google transport expects.
+ *
+ * A runtime (custom) OAuth provider without `getApiKey` falls back to the bare
+ * access token in `tryOAuth`, and the Google transport then rejects it as
+ * "Invalid Google Cloud Code Assist credentials". The built-in provider path
+ * builds this JSON from `apiKeyFormat: "structured"`; do the same here.
+ */
+function structuredApiKey(core, credential) {
+  if (core.Jl?.(PROVIDER)?.apiKeyFormat !== "structured") return credential.access;
+  return JSON.stringify({
+    apiEndpoint: credential.apiEndpoint,
+    token: credential.access,
+    enterpriseUrl: credential.enterpriseUrl,
+    projectId: credential.projectId,
+    refreshToken: credential.refresh,
+    expiresAt: credential.expires,
+    email: credential.email,
+    accountId: credential.accountId,
+  });
+}
+
 /** Load the bundled auth core. The symbols are minified, so accept the whole set. */
 async function loadBundledCore() {
   let names;
@@ -96,7 +118,14 @@ if (!core) {
       if (!definition?.login) {
         console.error(`[omp-shims] antigravity-unpause: ${PROVIDER} has no built-in login definition`);
       } else {
-        core.$de({ ...definition, id: PROVIDER, sourceId: SOURCE_ID });
+        const policy = core.Jl?.(PROVIDER) ?? {};
+        core.$de({
+          ...policy,
+          ...definition,
+          id: PROVIDER,
+          sourceId: SOURCE_ID,
+          getApiKey: (credential) => structuredApiKey(core, credential),
+        });
         console.error(
           `[omp-shims] antigravity-unpause: ${PROVIDER} re-enabled. ` +
             "Google may restrict accounts that use Antigravity outside its own apps; use at your own risk.",
