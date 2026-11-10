@@ -13,7 +13,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rule hides the provider and rejects its credentials). It removes the catalog
   flag and registers the built-in OAuth definition as a runtime provider;
   `omp-shims antigravity-login` runs `omp login google-antigravity` with the
-  preload. Re-enabling the provider can get the account banned.
+  preload. `OMP_SHIMS_ANTIGRAVITY_UNPAUSE=1 omp-shims systemd <unit>` adds the
+  preload to a generated service unit. Re-enabling the provider can get the
+  account banned.
 - `profile`: opt-in per-stage CPU attribution for the gateway request path
   (`OMP_SHIMS_PROFILE=1`), one aggregate line per window; off by default.
 - `lazy-router`: `OMP_SHIMS_REUSE_PORT=1` lets several gateway workers bind the

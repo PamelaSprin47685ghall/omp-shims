@@ -27,6 +27,25 @@ const captureEntry = join(packageRoot, "registry-capture.js");
 const antigravityPreloadEntry = join(packageRoot, "antigravity-unpause.js");
 const ompBin = process.env.OMP_BIN ?? join(homedir(), ".local", "bin", "omp");
 
+/** True when the service units should load the opt-in Antigravity unpause preload. */
+function antigravityUnpauseEnabled() {
+  const value = (process.env.OMP_SHIMS_ANTIGRAVITY_UNPAUSE ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+/** The BUN_OPTIONS value for a service unit. */
+function shimsBunOptions() {
+  const entries = [captureEntry];
+  if (antigravityUnpauseEnabled()) entries.push(antigravityPreloadEntry);
+  entries.push(preloadEntry);
+  for (const entry of entries) {
+    if (/\s/.test(entry)) {
+      fail(`the install path contains whitespace (${entry}); BUN_OPTIONS cannot quote a preload path`);
+    }
+  }
+  return entries.map((entry) => `--preload ${entry}`).join(" ");
+}
+
 function usage() {
   console.log(`omp-shims
 
@@ -89,7 +108,7 @@ switch (command) {
   }
 
   case "env": {
-    console.log(`Environment="BUN_OPTIONS=--preload ${captureEntry} --preload ${preloadEntry}"`);
+    console.log(`Environment="BUN_OPTIONS=${shimsBunOptions()}"`);
     break;
   }
 
@@ -107,7 +126,7 @@ switch (command) {
     const home = homedir();
     console.log(
       text
-        .replaceAll("@SHIMS_PRELOAD@", `Environment="BUN_OPTIONS=--preload ${captureEntry} --preload ${preloadEntry}"`)
+        .replaceAll("@SHIMS_PRELOAD@", `Environment="BUN_OPTIONS=${shimsBunOptions()}"`)
         .replaceAll("@OMP_BIN@", join(home, ".local", "bin", "omp"))
         .replaceAll("HOME=/root", `HOME=${home}`)
         .replaceAll("WorkingDirectory=/root", `WorkingDirectory=${home}`)

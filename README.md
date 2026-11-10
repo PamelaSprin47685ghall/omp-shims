@@ -126,6 +126,14 @@ BUN_OPTIONS="--preload $HOME/.omp/plugins/omp-shims/antigravity-unpause.js" \
 bun ~/.omp/plugins/omp-shims/bin/omp-shims.js antigravity-login
 ```
 
+To include the preload in the generated broker/gateway units, set
+`OMP_SHIMS_ANTIGRAVITY_UNPAUSE=1` while printing them:
+
+```sh
+OMP_SHIMS_ANTIGRAVITY_UNPAUSE=1 bun ~/.omp/plugins/omp-shims/bin/omp-shims.js systemd omp-auth-broker
+OMP_SHIMS_ANTIGRAVITY_UNPAUSE=1 bun ~/.omp/plugins/omp-shims/bin/omp-shims.js systemd omp-auth-gateway
+```
+
 This is deliberately opt-in: no systemd unit or plugin entry preloads the file.
 Google restricts accounts that use Antigravity outside its own apps, so
 re-enabling the provider can get the account banned.
