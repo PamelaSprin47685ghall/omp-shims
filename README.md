@@ -108,6 +108,28 @@ bun ~/.omp/plugins/omp-shims/bin/omp-shims.js env
 Do not put provider API keys in the unit. Use `omp /login`, which writes to the
 agent's credential store where the gateway already looks.
 
+### Re-enabling paused Google Antigravity
+
+OMP 18.18.6 added a `disabled` auth rule for `google-antigravity`:
+Google may restrict accounts that use Antigravity outside its own apps, so the
+provider is paused. The rule hides it from every login list, rejects its
+credentials and refuses its requests; the code, model catalog and stored
+credentials remain. `antigravity-unpause.js` removes that flag and registers the
+provider's built-in OAuth definition as a runtime provider, which re-enables
+login, `/model`, `omp token` and `omp models`:
+
+```sh
+BUN_OPTIONS="--preload $HOME/.omp/plugins/omp-shims/antigravity-unpause.js" \
+  omp login google-antigravity
+
+# or, through the CLI:
+bun ~/.omp/plugins/omp-shims/bin/omp-shims.js antigravity-login
+```
+
+This is deliberately opt-in: no systemd unit or plugin entry preloads the file.
+Google restricts accounts that use Antigravity outside its own apps, so
+re-enabling the provider can get the account banned.
+
 ### Multiple workers
 
 One gateway process serves every request on a single JavaScript thread, so

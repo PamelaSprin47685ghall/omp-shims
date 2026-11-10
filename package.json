@@ -34,6 +34,7 @@
   "files": [
     "index.js",
     "preload.js",
+    "antigravity-unpause.js",
     "registry-capture.js",
     "lib/",
     "features/",

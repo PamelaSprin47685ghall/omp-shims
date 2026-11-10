@@ -24,6 +24,8 @@ import { CONFIG_PATH, describeConfig, FEATURES, loadConfig, writeConfig } from "
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const preloadEntry = join(packageRoot, "preload.js");
 const captureEntry = join(packageRoot, "registry-capture.js");
+const antigravityPreloadEntry = join(packageRoot, "antigravity-unpause.js");
+const ompBin = process.env.OMP_BIN ?? join(homedir(), ".local", "bin", "omp");
 
 function usage() {
   console.log(`omp-shims
@@ -36,6 +38,8 @@ function usage() {
   add-account <provider> <plugin-package>
                         log in with a token read from stdin (never echoed) and
                         store it as its own account in agent.db
+  antigravity-login     run "omp login google-antigravity" with the unpause preload
+  antigravity-env       print the BUN_OPTIONS preload that re-enables google-antigravity
   repair-identities <provider>
                         give accounts stored with a placeholder e-mail their own identity
   help                  this text
@@ -51,6 +55,16 @@ function fail(message) {
 const [command, ...rest] = process.argv.slice(2);
 const ompDir = join(homedir(), ".omp");
 const agentDb = process.env.OMP_AGENT_DB ?? join(ompDir, "agent", "agent.db");
+
+/** Add the unpause preload to BUN_OPTIONS without dropping the caller's value. */
+function antigravityBunOptions() {
+  if (/\s/.test(antigravityPreloadEntry)) {
+    fail(`the install path contains whitespace (${antigravityPreloadEntry}); BUN_OPTIONS cannot quote a preload path`);
+  }
+  const existing = process.env.BUN_OPTIONS?.trim() ?? "";
+  if (existing.includes(antigravityPreloadEntry)) return existing;
+  return [existing, `--preload ${antigravityPreloadEntry}`].filter(Boolean).join(" ");
+}
 
 switch (command) {
   case "status": {
@@ -114,6 +128,27 @@ switch (command) {
     const { id, created } = upsertCredential(agentDb, provider, credential);
     console.log(`${provider}: ${created ? "added" : "updated"} account row ${id} (${credential.accountId})`);
     break;
+  }
+
+  case "antigravity-env": {
+    console.log(`BUN_OPTIONS="${antigravityBunOptions()}"`);
+    break;
+  }
+
+  case "antigravity-login": {
+    console.error(
+      "omp-shims: WARNING: Google may restrict accounts that use Antigravity outside its own apps; " +
+        "re-enabling this provider can get the account banned.",
+    );
+    const env = { ...process.env, BUN_OPTIONS: antigravityBunOptions() };
+    // A parent running this CLI through `BUN_BE_BUN=1 omp` must not make the
+    // child `omp` behave like Bun and treat "login" as a script path.
+    delete env.BUN_BE_BUN;
+    const child = Bun.spawn([ompBin, "login", "google-antigravity"], {
+      stdio: ["inherit", "inherit", "inherit"],
+      env,
+    });
+    process.exit(await child.exited);
   }
 
   case "repair-identities": {
