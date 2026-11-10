@@ -4,6 +4,99 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Status page v3.** The dashboard is now a Framework7 Svelte application with
+  server-rendered content, one-snapshot refresh, global four-worker statistics,
+  a shared token epoch, and a Framework7 reset dialog. `/` renders from one
+  `statusView()` snapshot; `GET /v1/lazy/status` serves the same
+  `StatusSnapshotV3` envelope. The page reports shared worker in-flight counts
+  (M03/M04), capacity, health, concurrency proof, affinity hit rate, the
+  30-minute complete/imputed perf window, and token totals for the current
+  epoch. Token totals cover streamed, non-streamed JSON, and direct model calls
+  (`含直连/非流式`) and are estimates, not billing.
+- A token **epoch** model: a reset creates a new epoch, and a request that
+  started before the reset writes only to its captured epoch. Resets are
+  HTTPS-gated, bearer-authorized, idempotent by `resetId`, conflict-safe within
+  two seconds, and atomic.
+- `worker_load` heartbeats, per-minute `affinity_stat` counters, `token_epochs`,
+  `token_totals`, and complete/imputed perf columns. The migration is
+  expand-only: `PRAGMA user_version` stays `2`, the legacy `totals`/`since`
+  mirror stays current, and the previous release opens the same database.
+- `scripts/deploy-status-assets.mjs` copies current and retained hashed assets
+  into `statusAssetDir` for rollback. It never moves or deletes, and keeps one
+  manifest per build.
+- An opt-in preload that re-enables OMP's paused `google-antigravity` provider:
+  `antigravity-unpause.mjs` clears the catalog `disabled` flag and registers the
+  built-in OAuth definition as a runtime provider with a structured `apiKey`.
+  `index.mjs` imports it; the service units add it only when
+  `OMP_SHIMS_ANTIGRAVITY_UNPAUSE` is true; `omp-shims antigravity-login` and
+  `omp-shims antigravity-env` set the same preload for terminal commands.
+
+### Changed
+
+- The status page has a narrow build-time Vite/Svelte toolchain:
+  `lib/router/status-page/app/**` compiles into committed
+  `lib/router/status-page/dist/`. The gateway runtime remains build-free. Run
+  `bun run build:status-page` after source changes; CI and the release workflow
+  run `bun run build:status-page:check`.
+- The theme is Material Design only; iOS users see Material Design, not a
+  native iOS theme.
+- The page CSP permits inline styles for Framework7 but still forbids inline
+  scripts and `unsafe-eval`.
+- The page is `noindex, nofollow`, uses `cache-control: no-store` for HTML, and
+  serves hashed JS/CSS as `public, max-age=31536000, immutable`.
+- New `lazy-router.statusBasePath` (default `""`) and `statusAssetDir` (default
+  `null`) settings support `/ops/`-style subpaths and rollback asset retention.
+
+- `tool-id-hash` is a clean-break rewrite. Every tool-call id now maps to a
+  12-character short id derived from a SHA-256 digest of the whole original,
+  stored in the `tool_ids` table of the shared `omp-shims-state.sqlite`. The
+  mapping is the same for every gateway worker and survives a restart; a
+  bounded 10,000-entry per-process cache serves both directions, `last_seen` is
+  refreshed at most once a minute, rows expire after seven days, and the table
+  is capped at 200,000 rows. Ids are no longer hashed into a prefix or
+  truncated, and the `salt` setting is gone.
+- A tool-id store failure fails open: the inbound body and the response pass
+  through unchanged instead of failing the model request.
+
+### Fixed
+
+- `npm pack` now ships `antigravity-unpause.mjs`. The published v2 tarball
+  omitted it while `index.mjs` imported it, so the plugin entry could not load
+  from the package.
+- The `lazy/pro` route keeps `google-antigravity/gemini-4-argon`. The published
+  v2 preset renamed it to `gemini-4-carbon-medium`, a model the bundled price
+  table does not list.
+- A lazy-router attempt no longer drops `content-encoding` from a provider
+  request whose body is already compressed. Codex tool requests reached the
+  upstream as compressed bytes without their decoder and failed with `400 Bad
+  Request`; the pinned account headers now leave the body encoding intact.
+- A provider quota or credential failure can no longer reach the client as a
+  raw `401`/`402`/`403`/`429`, a billing message, or a provider URL.
+  `classifyFailure` now maps those account statuses to `QUOTA` or `CREDENTIAL`
+  even when the transport never observed a provider contact, and only a
+  malformed `400` (or a provider-confirmed `404`) is a `REQUEST`.
+- A `429` keeps the quota label but uses the 30-second rate-limit cooldown, so
+  a busy account is retried soon instead of being benched for 30 minutes.
+- `isGatewayRequestRejection` no longer treats `401`/`402`/`403` as a client
+  rejection, so a quota reply benches the candidate and the router continues
+  with the next one.
+- `#exhausted` and `#rejected` answer one deterministic `503`
+  `lazy_router_unavailable`; the last upstream status, unit, model, and text
+  stay internal.
+- Custom-provider and extension fallbacks replace every non-2xx upstream body
+  with a generic `502`/`503`.
+- A direct model call (outside `lazy/*`) passes through a new response guard:
+  a provider quota body becomes the same generic `503`.
+- A provider quota or `429` failure that arrives as a thrown exception is
+  classified as `QUOTA`/`CREDENTIAL`: lazy routes fail over, and a direct call
+  answers a generic `503` instead of the provider text. A `200` event stream
+  whose first frame carries a quota error is converted before the client sees
+  it.
+
 ## [2.0.0] - 2026-11-09
 
 Version 2 is a clean-break rewrite in pure ES modules. It keeps the same jobs as

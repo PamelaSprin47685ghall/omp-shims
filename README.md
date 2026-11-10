@@ -40,10 +40,10 @@ The catalog has exactly 13 features. Defaults come from
 | `gateway-compat` | on | Drop known optional JSON `null` fields at the inbound edge before request validation. |
 | `sse-heartbeat` | on | Write an SSE keep-alive comment when a gateway event stream has been idle. |
 | `reasoning-order` | on | Emit typed reasoning before visible body in Chat, Responses and Messages SSE. |
-| `tool-id-hash` | on | Prefix every tool-call id with a hash8 so upstream accepts ids that share a long prefix. |
+| `tool-id-hash` | on | Give every tool-call id a short stable id so upstream accepts long or colliding ids. |
 | `antigravity` | on | Unified Antigravity shim: system instruction, tier routing, continuation recovery, capture, account routing. |
 | `copilot-auto` | on | Negotiate GitHub Copilot Auto model routing and inject the required session token. |
-| `lazy-router` | **off** | Serve `lazy/pro`, `lazy/weak`, `lazy/default`, and `lazy/task` with online ranking and probe-driven failover. |
+| `lazy-router` | **off** | Serve `lazy/pro`, `lazy/weak`, `lazy/default`, and `lazy/task` with online ranking and probe-driven failover, plus the `/` operations dashboard. |
 | `cline-pin-upstream` | on | Pin ClinePass `chat/completions` to a fixed upstream channel. |
 | `ipv6-first` | on | Resolve IPv6 first for outbound requests, falling back to IPv4 per address. |
 | `plugin-bridge` | on | Expose installed OMP plugins to the auth-gateway model registry and supply credentials. |
@@ -168,7 +168,7 @@ default shown.
 | `gateway-compat` | `enabled` | `true` |
 | `sse-heartbeat` | `enabled`, `intervalMs` | `true`, `15000` |
 | `reasoning-order` | `enabled`, `maxBufferBytes` | `true`, `16777216` |
-| `tool-id-hash` | `enabled`, `salt` | `true`, `""` |
+| `tool-id-hash` | `enabled` | `true` |
 | `ipv6-first` | `enabled`, `ttlMs` | `true`, `60000` |
 
 #### Antigravity
@@ -197,6 +197,28 @@ The account-routing part matches accounts in OMP's `agent.db` by e-mail
 address. With no `ultraAccounts`, Ultra-only models use the gateway's own
 credential. With no `proAccounts`, every account that is not an Ultra account
 counts as Pro.
+
+#### Paused Antigravity provider
+
+OMP 18.18.6 hides `google-antigravity` behind a catalog `disabled` rule:
+Google may restrict accounts that use Antigravity outside its own apps.
+[`antigravity-unpause.mjs`](antigravity-unpause.mjs) clears that flag and
+registers the provider's built-in OAuth definition as a runtime provider, so
+stored credentials, `/login`, model discovery, and `omp token` work again. It
+also builds the structured `apiKey` that the Google transport expects.
+
+The plugin entry (`index.mjs`) imports the preload, so a plugin session always
+re-enables the provider. Service units add it to `BUN_OPTIONS` only when
+`OMP_SHIMS_ANTIGRAVITY_UNPAUSE` is true. For a terminal command:
+
+```sh
+omp-shims antigravity-login   # omp login google-antigravity with the preload
+eval "$(omp-shims antigravity-env)"   # export BUN_OPTIONS for other commands
+```
+
+Re-enabling this provider can get an account banned. The preload is the only
+module that touches OMP internals; it prints one line when it cannot find the
+auth core and never fails the process that loaded it.
 
 #### Provider features
 
@@ -280,6 +302,8 @@ in v2.
 | `store` | `"sqlite"` |
 | `routesFile`, `holidaysFile` | `null` (bundled presets) |
 | `statusPath` | `"/v1/lazy/status"` |
+| `statusBasePath` | `""` |
+| `statusAssetDir` | `null` |
 | `clientOnlyPrefix` | `"lazy/"` |
 | `allowNonChatPassThrough` | `true` |
 | `probeIntervalMs`, `probeTimeoutMs` | `1800000`, `90000` |
@@ -301,8 +325,82 @@ in v2.
 The shared state database is the top-level `stateDbPath` setting. `null` or an
 absent value means `~/.omp/omp-shims-state.sqlite`. It holds cooldowns,
 admission windows, account cooldowns, performance history, speed statistics,
-concurrency proofs, and affinity prefixes. Several workers may share it.
+concurrency proofs, affinity prefixes, and the tool-call id mapping. Several
+workers may share it. It also holds the v3 worker heartbeats
+(`worker_load`), per-minute affinity counters (`affinity_stat`), and the token
+epoch/totals tables (`token_epochs`, `token_totals`). A reset creates a new
+epoch; old rows stay for diagnostics and are never mixed into the current view.
 
+#### Status page
+
+With `lazy-router` enabled, `GET /` serves the operations dashboard and
+`GET /v1/lazy/status` serves the same data as one `StatusSnapshotV3` JSON
+object. The page refreshes itself with one status request per cycle and stops
+polling when the server build or schema changes. `<html class="md">` is fixed:
+Material Design only, including on iOS. The page is `noindex, nofollow` and its
+responses use `cache-control: no-store`.
+
+The page has a narrow build-time exception to the pure-ESM rule:
+`lib/router/status-page/app/**` is Svelte source compiled by Vite into the
+committed `lib/router/status-page/dist/`. The gateway itself never builds at
+startup or on a request. After changing the page source run:
+
+```sh
+bun run build:status-page        # rebuild dist (compiler stays a devDependency)
+bun run build:status-page:check  # fail if the committed dist is stale
+```
+
+`bun run build:status-page:check` is the release gate; it builds into `.tmp/`
+and never writes `dist`. Two clean builds produce the same manifest and asset
+hashes. `package.json` explicitly ships `lib/router/status-page/dist/`, so
+`npm pack` contains `manifest.json`, the SSR bundle, and every current and
+retained asset.
+
+The exact page CSP permits inline **styles** because Framework7 needs them, but
+still forbids inline scripts and `unsafe-eval`:
+
+```
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'
+```
+
+The dashboard reports global worker in-flight counts, shared capacity, shared
+health, affinity hit rate, concurrency proof, and token totals for the current
+epoch. Token totals include streamed, non-streamed JSON, and direct model
+requests (`含直连/非流式`); they are estimates, not billing. The reset action
+requires the gateway bearer token, HTTPS or a loopback peer, and clears only the
+current token epoch.
+
+**Subpath (`/ops/`).** Either set `features["lazy-router"].statusBasePath` in
+`shims.json` (for example `"/ops"`) or let a trusted loopback proxy send
+`X-Forwarded-Prefix`. The handler strips the prefix before matching `/`, the
+asset prefix, the status path, and the reset path. nginx:
+
+```nginx
+location /ops/ {
+  proxy_set_header X-Forwarded-Prefix /ops;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_pass http://127.0.0.1:8787/;
+}
+```
+
+**Asset retention and rollback.** `statusAssetDir` (default `null`) is an
+optional deployment directory for hashed assets from older releases. Copy the
+current build there with:
+
+```sh
+bun scripts/deploy-status-assets.mjs --to /srv/omp/status-assets
+```
+
+The script only copies. It never moves or deletes assets, and it keeps an
+immutable `manifests/<buildId>.json` for every release, so a tab opened before
+an upgrade can still load its entry script. The deployment directory must be
+root-owned and not writable by the web user; otherwise a compromised gateway
+could replace its own JavaScript. To roll back, copy the previous
+package's assets into the same directory (without deleting the newer ones),
+switch the package, and restart the workers; do not drop database tables. The
+expand migration leaves `PRAGMA user_version = 2` and the legacy totals mirror
+in place, so the previous release opens the same database.
 ### Preset policy
 
 Live policy is data, not code. The bundled presets live in
@@ -358,6 +456,7 @@ Other supported variables:
 | `OMP_SHIMS_CONFIG` | Config file path. |
 | `OMP_SHIMS_VERBOSE=1` | Log what each feature does. |
 | `OMP_SHIMS_REUSE_PORT=1` | Let several gateway workers bind one address. |
+| `OMP_SHIMS_ANTIGRAVITY_UNPAUSE=true` | Add the unpause preload to the service units' `BUN_OPTIONS`. |
 
 Sub-option environment variables from v1 — `OMP_SHIMS_AG_*`,
 `OMP_SHIMS_TRAFFIC_LOG_DIR`, `OMP_SHIMS_LAZY_*_PATH`,
@@ -384,6 +483,8 @@ bun ~/.omp/plugins/omp-shims/bin/omp-shims.mjs <command>
 | `env` | Print the systemd `BUN_OPTIONS` line. |
 | `systemd [unit]` | Print a unit with the current account's paths: `omp-auth-gateway`, `omp-auth-gateway@`, or `omp-auth-broker`. |
 | `add-account <provider> <plugin-package>` | Read a token from stdin without echo, back up `agent.db`, and add or update the account. |
+| `antigravity-login` | Run `omp login google-antigravity` with the unpause preload in `BUN_OPTIONS`. |
+| `antigravity-env` | Print the `BUN_OPTIONS` preload that re-enables `google-antigravity`. |
 | `repair-identities <provider>` | Give accounts stored with a placeholder identity their own identity. |
 | `uninstall [--dry-run\|--clean] [--yes]` | List generated state, or remove it with `--clean --yes`. |
 
@@ -596,30 +697,43 @@ opens `agent.db`, reads it read-only for lookups, and writes only the rotated
 one incremental scanner that accepts any chunk split, one bounded transform,
 and one response rebuilder.
 
+[`lib/tool-id-store.mjs`](lib/tool-id-store.mjs) is the only owner of the
+`tool_ids` table. It opens the shared state database with WAL, keeps one
+bounded cache in each direction, and prunes expired rows without ever failing a
+request.
+
 Only public OMP surface is used: the `ModelRegistry` export and its documented
 methods, plus the plugin registration API. No minified identifiers are
 referenced.
 
-### Tool-call id collisions
+### Tool-call id shortening
 
 Some providers reject two tool calls whose ids share their first nine
 characters when those nine are alphanumeric. Clients mint ids like
 `call_0000000000000001` and `call_0000000000000002`, which collide, so the
-second call fails with a stream that dies part-way through.
+second call fails with a stream that dies part-way through. Long client ids can
+also exceed the 64-character limit that OpenAI-style endpoints accept.
 
-`tool-id-hash` prefixes every id in the inbound request with a hash8 derived
-from the id, and walks the response to put the client's own ids back, so the
-client is unaware anything happened. Two properties make the prefix safe:
+`tool-id-hash` gives every distinct id a 12-character short id: `t_` plus ten
+base64url characters of a SHA-256 digest of the whole original. The request
+body is rewritten, and the response is walked to put the client's own ids back,
+so the client is unaware anything happened. The original is never truncated.
 
-- eight base64 characters carry 48 bits, so two distinct ids essentially never
-  share a prefix; and
-- the separator after the prefix is not alphanumeric, so even a stricter
-  nine-character comparison never sees nine alphanumeric characters.
+The mapping is a `tool_ids` table in the shared
+`~/.omp/omp-shims-state.sqlite`, so every gateway worker and every later
+process sees the same short for the same original. A deterministic short needs
+one upsert per new id. Each process keeps a bounded 10,000-entry cache in both
+directions, and a row's `last_seen` is written at most once a minute. Rows
+older than seven days are pruned, and the table is capped at 200,000 rows.
 
-The transform is deliberately not idempotent: an id that merely looks hashed
-may still be one a client minted. Every occurrence of the same id inside a
-request is transformed identically, so a tool call and the result answering it
-always stay paired.
+Only id fields are touched: `tool_call_id`, `tool_use_id`, `toolUseId`,
+`toolCallId`, `toolCallID`, `toolId`, `call_id`, `callId`, tool-call and
+tool-use block ids, `function_call.id`, `function_call_output.call_id`, and the
+same shapes nested under `item` or `content`. Arguments, names, and unknown ids
+are never rewritten, and a response value that is not a minted short passes
+through unchanged. A failure to open or write the store leaves the inbound body
+and the response byte-identical: the feature fails open instead of failing a
+model request.
 
 ## Security
 
@@ -656,7 +770,8 @@ Generated files:
 
 | Path | Contents |
 | --- | --- |
-| `~/.omp/omp-shims-state.sqlite` | One shared routing state database (`user_version = 2`). |
+| `~/.omp/omp-shims-state.sqlite` | One shared state database (`user_version = 2`): routing state, worker heartbeats, affinity counters, token epochs/totals, and tool-call id mappings. |
+| `lib/router/status-page/dist/` | Committed status-page build output. Never edit by hand; run `bun run build:status-page`. |
 | `~/.omp/logs/lazy-router.jsonl` | Router events. Rotates at 64 MiB, one generation kept. |
 | `~/.omp/logs/antigravity-continuation.jsonl` | Continuation diagnostics. |
 | `~/.omp/logs/antigravity-streams.jsonl` | Antigravity capture output. |
