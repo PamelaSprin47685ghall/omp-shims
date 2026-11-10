@@ -1,0 +1,16 @@
+{
+  "$comment": "ClinePass transport and channel policy. host and baseURL identify the only accepted origin; upstream is the channel pin used when the table has no entry for a model; modelChannels maps model ids to a bare channel list or { only: [...] } and is merged over the preset by features.cline-pin-upstream.modelChannels. Edit this file, not code.",
+  "host": "api.cline.bot",
+  "baseURL": "https://api.cline.bot/api/v1",
+  "upstream": "openai-compatible-private",
+  "modelChannels": {
+    "deepseek-v4.1-flash": ["deepseek"],
+    "cline-pass/deepseek-v4.1-flash": ["deepseek"],
+    "glm-5.3-flash": {
+      "only": ["wafer", "inference-net", "digitalocean"]
+    },
+    "cline-pass/glm-5.3-flash": {
+      "only": ["wafer", "inference-net", "digitalocean"]
+    }
+  }
+}

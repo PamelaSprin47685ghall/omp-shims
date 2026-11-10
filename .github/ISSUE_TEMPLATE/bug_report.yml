@@ -5,13 +5,28 @@ body:
   - type: markdown
     attributes:
       value: |
-        Please never paste API keys, tokens or account e-mail addresses. Redact them.
-  - type: input
+        Please never paste API keys, tokens, or account e-mail addresses. Redact them.
+        Diagnostics go to stderr; `OMP_SHIMS_VERBOSE=1` adds detail.
+  - type: dropdown
     id: feature
     attributes:
       label: Feature
-      description: Which feature is involved (see `omp-shims status`)?
-      placeholder: antigravity-continuation
+      description: Which v2 feature is involved? `omp-shims status` lists them.
+      options:
+        - gateway-compat
+        - sse-heartbeat
+        - reasoning-order
+        - tool-id-hash
+        - antigravity
+        - copilot-auto
+        - lazy-router
+        - cline-pin-upstream
+        - ipv6-first
+        - plugin-bridge
+        - models-bridge
+        - traffic-log
+        - kiro-credential-sync
+        - CLI, systemd, migration, or configuration
     validations:
       required: true
   - type: textarea
@@ -25,6 +40,12 @@ body:
     attributes:
       label: Steps to reproduce
   - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor and status
+      description: Output of `omp-shims doctor` and `omp-shims status --json`, redacted.
+      render: text
+  - type: textarea
     id: logs
     attributes:
       label: Logs
@@ -34,6 +55,6 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: omp-shims commit, `omp --version`, `bun --version`, OS.
+      description: omp-shims version, `omp --version`, `bun --version`, OS.
     validations:
       required: true

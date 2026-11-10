@@ -1,0 +1,5 @@
+{
+  "$comment": "Antigravity model-family policy. tieredPattern matches the Flash families that upstream serves as -tiered models (capture group 1 is the base model id); ultraModelPattern selects models that only Ultra accounts can serve. Both are regular-expression strings and may be overridden under features.antigravity.",
+  "tieredPattern": "^(gemini-3\\.[678]-flash)(?:-(?:minimal|low|medium|high|tiered))?$",
+  "ultraModelPattern": "gemini-4|opus|sonnet"
+}

@@ -4,15 +4,23 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
-WorkingDirectory=/root
-Environment=HOME=/root
-Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+User=@OMP_USER@
+WorkingDirectory=@OMP_HOME@
+Environment=HOME=@OMP_HOME@
+Environment=PATH=@OMP_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment="NODE_OPTIONS=--no-network-family-autoselection"
+UMask=0077
 
-# Same preload as the gateway so both processes resolve credentials and network
-# behaviour identically.
+# Load the omp-shims hook and the feature runtime. Feature selection lives in
+# ~/.omp/shims.json, so this line never changes between deployments.
 @SHIMS_PRELOAD@
+
+# Optional per-feature overrides (uncomment what you need):
+# Environment="OMP_SHIMS_VERBOSE=1"
+# Environment="OMP_SHIMS_LAZY_ROUTER=off"
+#
+# Do not put provider API keys here. Use `omp /login`, which writes to the
+# agent's credential store where the gateway already looks.
 
 ExecStart=@OMP_BIN@ auth-broker serve --bind=127.0.0.1:8765
 Restart=always

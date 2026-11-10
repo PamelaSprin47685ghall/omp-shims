@@ -1,0 +1,136 @@
+{
+  "$comment": "Default composable route preset: keyed-model leaves, fallback, random and rating nodes. All time windows are UTC; Mainland China public holidays come from holidays-cn.json. Policy data lives in presets: model references and tiers here, ranking weights in ranking.json, vendor off-peak schedules in offpeak.json, and pricing in rates.json. clientOnlyPrefix is the route-id namespace the Lazy Router owns. No concrete model id, model-family pattern, route-id prefix, off-peak schedule, or ranking weight is hardcoded in routing code.",
+  "contextWindow": 500000,
+  "maxOutputTokens": 64000,
+  "clientOnlyPrefix": "lazy/",
+  "providerHeaderTimeouts": {
+    "commandcode": 1800000
+  },
+  "maxInFlight": {
+    "ollama-cloud": 3,
+    "charm-hyper": 2,
+    "mistral/deepseek-v4-1-flash-1017": 60,
+    "mistral/zai-glm-5-3-flash": 60
+  },
+  "peakWindows": [{ "from": "09:00", "to": "12:00" }, { "from": "14:00", "to": "18:00" }],
+  "routes": {
+    "lazy/pro": {
+      "displayName": "Lazy Pro",
+      "graph": {
+        "type": "rating",
+        "children": [
+          {
+            "type": "model",
+            "model": "kiro/claude-opus-5-5",
+            "effort": "medium"
+          },
+          {
+            "type": "model",
+            "model": "google-antigravity/claude-opus-5-5",
+            "tier": "ultra",
+            "effort": "medium"
+          },
+          {
+            "type": "fallback",
+            "children": [
+              {
+                "type": "model",
+                "model": "google-antigravity/gemini-4-carbon-medium",
+                "tier": "ultra",
+                "effort": "medium"
+              },
+              {
+                "type": "model",
+                "model": "google-antigravity/gemini-4-carbon-medium",
+                "tier": "pro",
+                "effort": "medium"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "lazy/weak": {
+      "displayName": "Lazy Weak",
+      "contextWindow": 250000,
+      "maxOutputTokens": 32768,
+      "graph": {
+        "type": "model",
+        "model": "mistral/mistral-small-latest",
+        "effort": "high"
+      }
+    },
+    "lazy/default": {
+      "displayName": "Lazy Default · Terra Medium (Plus → Pro → API Flex)",
+      "graph": {
+        "type": "fallback",
+        "children": [
+          {
+            "type": "model",
+            "model": "openai-codex/gpt-6.1-terra",
+            "tier": "plus",
+            "effort": "medium"
+          },
+          {
+            "type": "model",
+            "model": "openai-codex/gpt-6.1-terra",
+            "tier": "pro",
+            "effort": "medium"
+          },
+          {
+            "type": "model",
+            "model": "openai-api/gpt-6.1-terra",
+            "effort": "medium"
+          }
+        ]
+      }
+    },
+    "lazy/task": {
+      "displayName": "Lazy Task · DeepSeek (competitive)",
+      "graph": {
+        "type": "rating",
+        "children": [
+          {
+            "type": "model",
+            "model": "mistral/deepseek-v4-1-flash-1017",
+            "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "charm-hyper/deepseek-v4.1-flash-1017",
+            "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "effort": "max",
+            "offPeakOnly": "deepseek"
+          },
+          {
+            "type": "model",
+            "model": "ollama-cloud/deepseek-v4.1-flash:1017",
+            "effort": "max",
+            "offPeakOnly": "ollama"
+          },
+          {
+            "type": "model",
+            "model": "cline-pass/deepseek-v4.1-flash-1017",
+            "effort": "max",
+            "offPeakOnly": "deepseek"
+          },
+          {
+            "type": "model",
+            "model": "ctyun/deepseek-v4.1-flash",
+            "effort": "max"
+          },
+          {
+            "type": "model",
+            "model": "commandcode/deepseek/deepseek-v4.1-flash",
+            "effort": "max",
+            "offPeakOnly": "commandcode"
+          }
+        ]
+      }
+    }
+  }
+}

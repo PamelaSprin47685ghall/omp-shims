@@ -1,0 +1,23 @@
+{
+  "$comment": "Vendor off-peak schedules for route leaves with offPeakOnly. weekdays use ISO numbering (1 = Monday, 7 = Sunday); utcWindows are half-open [from, to) UTC clock spans. excludeCalendarHolidays applies the Mainland China holiday calendar, and holidayUtcOffsetHours maps one instant onto that calendar's local date. Schedule names are policy data; code never names a channel.",
+  "schedules": {
+    "deepseek": {
+      "weekdays": [1, 2, 3, 4, 5],
+      "utcWindows": [{ "from": "01:00", "to": "04:00" }, { "from": "06:00", "to": "10:00" }],
+      "excludeCalendarHolidays": true,
+      "holidayUtcOffsetHours": 8
+    },
+    "commandcode": {
+      "weekdays": [1, 2, 3, 4, 5],
+      "utcWindows": [{ "from": "01:00", "to": "04:00" }, { "from": "06:00", "to": "10:00" }],
+      "excludeCalendarHolidays": false,
+      "holidayUtcOffsetHours": 8
+    },
+    "ollama": {
+      "weekdays": [1, 2, 3, 4, 5],
+      "utcWindows": [{ "from": "12:00", "to": "18:00" }],
+      "excludeCalendarHolidays": false,
+      "holidayUtcOffsetHours": 8
+    }
+  }
+}

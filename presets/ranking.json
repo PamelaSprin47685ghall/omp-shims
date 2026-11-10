@@ -1,0 +1,21 @@
+{
+  "$comment": "Default routing policy for the Lazy Router. Every ranking weight lives here: lib/config.mjs exposes this object as features[\"lazy-router\"].routing, and lib/router/ranking.mjs uses it as the fallback for its pure scoring functions. excellentPrior and mediumPrior are v1 migration provenance only; they are accepted and preserved, never consumed by v2 scoring, which uses the continuous intelligenceCenter/intelligenceSlope prior. temperature carries the v1 default 0.60.",
+  "routing": {
+    "intelligenceCenter": 50,
+    "intelligenceSlope": 0.06,
+    "costWeight": 0.2,
+    "latencyWeight": 1,
+    "historicalLatencyWeight": 0.25,
+    "rdInitial": 1,
+    "rdFloor": 0.1,
+    "rdSampleScale": 12,
+    "affinityWeight": 0.5,
+    "affinityLengthScaleBytes": 8192,
+    "affinityCoveragePower": 2,
+    "affinityLengthPower": 2,
+    "affinityTemperatureWeight": 1,
+    "temperature": 0.6,
+    "excellentPrior": null,
+    "mediumPrior": null
+  }
+}

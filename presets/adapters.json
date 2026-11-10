@@ -1,0 +1,7 @@
+{
+  "$comment": "Provider adapter policy. Each key is a provider id. upstreamEffortWriter names a writer in lib/router/upstream-effort.mjs; requiresAttemptTrust means only a Lazy Router Attempt scope, not the gateway bearer, may authorize a plugin transport call. Both are mechanism switches keyed here so code contains no provider literal.",
+  "commandcode": {
+    "upstreamEffortWriter": "params-reasoning-effort",
+    "requiresAttemptTrust": true
+  }
+}

@@ -1,53 +1,60 @@
 {
   "name": "omp-shims",
-  "version": "1.0.0",
-  "description": "Portable, individually switchable compatibility shims for the OMP auth-gateway (plugin bridge, tool-id hashing, Antigravity request repair, IPv6-first fetch, traffic logging).",
+  "version": "2.0.0",
+  "description": "Portable, individually switchable compatibility shims for the OMP auth-gateway (plugin bridge, tool-id shortening, Antigravity request repair, IPv6-first fetch, traffic logging).",
   "type": "module",
-  "main": "index.js",
+  "main": "./index.mjs",
   "exports": {
-    ".": "./index.js",
-    "./preload": "./preload.js",
-    "./registry-capture": "./registry-capture.js",
-    "./config": "./lib/config.js",
+    ".": "./index.mjs",
+    "./preload": "./preload.mjs",
+    "./registry-capture": "./registry-capture.mjs",
+    "./config": "./lib/config.mjs",
+    "./contracts": "./lib/contracts.mjs",
     "./package.json": "./package.json"
   },
   "pi": {
     "extensions": [
-      "./index.js"
+      "./index.mjs"
     ]
   },
   "omp": {
     "extensions": [
-      "./index.js"
+      "./index.mjs"
     ]
   },
   "bin": {
-    "omp-shims": "./bin/omp-shims.js"
+    "omp-shims": "./bin/omp-shims.mjs"
   },
   "scripts": {
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check .",
     "test": "bun test",
-    "ci": "biome ci . && bun test"
+    "ci": "biome ci . && bun test",
+    "prepublishOnly": "bun run ci"
   },
   "files": [
-    "index.js",
-    "preload.js",
-    "antigravity-unpause.js",
-    "registry-capture.js",
+    "index.mjs",
+    "preload.mjs",
+    "registry-capture.mjs",
     "lib/",
     "features/",
+    "presets/",
     "vendor/",
     "systemd/",
     "bin/",
+    "scripts/",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
-    "bun": ">=1.2.0"
+    "bun": ">=1.4.4"
   },
+  "os": [
+    "linux",
+    "darwin"
+  ],
   "license": "MIT",
   "private": false,
   "repository": {

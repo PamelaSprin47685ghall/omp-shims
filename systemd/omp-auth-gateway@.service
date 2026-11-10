@@ -1,0 +1,37 @@
+[Unit]
+Description=Oh My Pi Auth Gateway (worker %i)
+After=network.target omp-auth-broker.service
+Wants=omp-auth-broker.service
+
+[Service]
+Type=simple
+User=@OMP_USER@
+WorkingDirectory=@OMP_HOME@
+Environment=HOME=@OMP_HOME@
+Environment=PATH=@OMP_BIN_DIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=OMP_AUTH_BROKER_URL=http://127.0.0.1:8765
+Environment="NODE_OPTIONS=--no-network-family-autoselection"
+
+# Every worker binds the same address. The kernel spreads new connections, and
+# each connection keeps the worker that accepted it (prompt-cache affinity).
+Environment="OMP_SHIMS_REUSE_PORT=1"
+# Optional per-worker settings. The v2 state database is shared, so no per-worker
+# state path is needed.
+EnvironmentFile=-/etc/omp-shims/%i.env
+UMask=0077
+
+# Load the omp-shims hook and the feature runtime. Feature selection lives in
+# ~/.omp/shims.json, so this line never changes between deployments.
+@SHIMS_PRELOAD@
+
+# Do not put provider API keys here. Use `omp /login`, which writes to the
+# agent's credential store where the gateway already looks.
+
+ExecStart=@OMP_BIN@ auth-gateway serve --bind=127.0.0.1:4000
+Restart=always
+RestartSec=3
+KillMode=process
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

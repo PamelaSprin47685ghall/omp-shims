@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a new shim or an improvement to an existing one.
+description: Propose a new shim, a new setting, or an improvement to an existing feature.
 labels: [enhancement]
 body:
   - type: textarea
@@ -13,6 +13,14 @@ body:
     id: proposal
     attributes:
       label: Proposed change
+      description: Which v2 feature changes, or which new feature is needed? Name its install phase.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: The settings this needs in `~/.omp/shims.json`, with defaults.
   - type: textarea
     id: alternatives
     attributes:

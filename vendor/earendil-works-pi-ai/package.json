@@ -2,9 +2,10 @@
   "name": "@earendil-works/pi-ai",
   "version": "0.99.2",
   "type": "module",
-  "main": "index.js",
+  "main": "./index.mjs",
   "exports": {
-    ".": "./index.js",
-    "./compat": "./compat.js"
-  }
+    ".": "./index.mjs",
+    "./compat": "./compat.mjs"
+  },
+  "license": "MIT"
 }

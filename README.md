@@ -3,15 +3,16 @@
 [![CI](https://github.com/PamelaSprin47685ghall/omp-shims/actions/workflows/ci.yml/badge.svg)](https://github.com/PamelaSprin47685ghall/omp-shims/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Portable compatibility shims for the Oh My Pi (OMP) auth-gateway, packaged as an OMP plugin.
+Portable compatibility shims for the Oh My Pi (OMP) auth-gateway, packaged as an
+OMP plugin. Version 2 is a clean-break rewrite in pure ES modules (`.mjs`).
 
-The OMP auth-gateway is a long-running service that answers model requests on
-behalf of every client on a machine. Out of the box it cannot serve providers
-that come from plugins, and several upstreams (Antigravity / Cloud Code Assist,
-ClinePass, ...) need their requests nudged before they work reliably. omp-shims
-collects those fixes in one place. Each fix is an independent **feature** that can
-be switched on or off without touching code, so the gateway behaves the same way
-on every machine.
+The OMP auth-gateway is a long-running service that answers model requests for
+every client on a machine. Out of the box it cannot serve providers that come
+from plugins, and several upstreams (Antigravity / Cloud Code Assist, ClinePass,
+...) need their requests nudged before they work reliably. omp-shims collects
+those fixes in one place. Each fix is an independent **feature** that you can
+switch without touching code, so the gateway behaves the same way on every
+machine.
 
 ## Contents
 
@@ -19,51 +20,72 @@ on every machine.
 - [Requirements](#requirements)
 - [Install](#install)
 - [Configuration](#configuration)
+- [Environment variables](#environment-variables)
 - [CLI](#cli)
+- [Migration from v1](#migration-from-v1)
+- [systemd](#systemd)
 - [How it works](#how-it-works)
-- [Diagnostics](#diagnostics)
+- [Security](#security)
+- [Diagnostics and logs](#diagnostics-and-logs)
 - [Development](#development)
 - [License](#license)
 
 ## Features
 
+The catalog has exactly 13 features. Defaults come from
+[`lib/config.mjs`](lib/config.mjs).
+
 | Feature | Default | Purpose |
 | --- | --- | --- |
-| `plugin-bridge` | on | Loads installed OMP plugins and registers their providers with the gateway's model registry, so `kiro/*` and `commandcode/*` are served natively instead of returning `Unknown model`. |
-| `models-bridge` | on | Exposes custom models declared in `models.yml` to the gateway's model registry and supplies credentials, so they can be reverse-proxied. |
-| `vendor-shims` | on | Installs the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` packages that pi provider plugins expect the host to provide, and routes their streaming to the host and to each provider's own transport. When the host exports no `streamSimple` for a standard api, it asks the model's Provider API once whether the account may use it, so a `403 upgrade_required` still reaches the provider's transport and its generate fallback can run. |
-| `ipv6-first` | on | Connects over IPv6 when a host publishes AAAA records, falling back to IPv4 per address. |
-| `antigravity-system-instruction` | on | Sends the Antigravity system prompt as a leading user turn; upstream answers a real `systemInstruction` with a bogus 429. |
-| `antigravity-routing` | **off** | Routes Gemini 3.6/3.7/3.8 Flash to the upstream `-tiered` models with a thinking level. |
-| `antigravity-continuation` | on | Recovers turns that end thought-only, malformed, or truncated, by replaying them as a real continuation. |
-| `antigravity-capture` | on | Writes Antigravity stream diagnostics to a JSONL file. |
-| `antigravity-account-routing` | on | Routes Antigravity requests across your configured accounts by tier (see [below](#antigravity-account-routing)). |
-| `cline-pin-upstream` | on | Pins ClinePass `chat/completions` requests to a fixed upstream channel. |
-| `tool-id-hash` | on | Prefixes every inbound tool-call id with a hash8, and restores the client's ids on the way out (see [below](#tool-call-id-collisions)). |
-| `copilot-auto` | on | Negotiates GitHub Copilot `auto` routing and injects the required `Copilot-Session-Token` for gated models. |
-| `kiro-credential-sync` | on | Copies kiro-cli's rotated token into the auth-broker credential store so its refresh sweep stops failing. Started by the services only. |
-| `traffic-log` | **off** | Logs every inbound gateway request to hourly-rolling files (secrets in headers are redacted). |
-| `lazy-router` | **off** | Adds `lazy/default`, `lazy/task` and `lazy/vision`: virtual models that pick the first healthy (provider, account) unit from a peak-aware route table selected by account tier (see [below](#lazy-router)). |
-| `sse-heartbeat` | **off** | Writes an SSE comment (`: keep-alive`) between events when a gateway event stream has been silent for `intervalMs`, so proxies and NATs do not cut long-thinking streams (see [below](#sse-heartbeat)). Gateway process only. |
-| `native-loop-guard` | **off** | OMP's own thinking-loop guard. Off by default, because it aborts and retries the identical body; nothing here compensates loops. |
+| `gateway-compat` | on | Drop known optional JSON `null` fields at the inbound edge before request validation. |
+| `sse-heartbeat` | on | Write an SSE keep-alive comment when a gateway event stream has been idle. |
+| `reasoning-order` | on | Emit typed reasoning before visible body in Chat, Responses and Messages SSE. |
+| `tool-id-hash` | on | Prefix every tool-call id with a hash8 so upstream accepts ids that share a long prefix. |
+| `antigravity` | on | Unified Antigravity shim: system instruction, tier routing, continuation recovery, capture, account routing. |
+| `copilot-auto` | on | Negotiate GitHub Copilot Auto model routing and inject the required session token. |
+| `lazy-router` | **off** | Serve `lazy/pro`, `lazy/weak`, `lazy/default`, and `lazy/task` with online ranking and probe-driven failover. |
+| `cline-pin-upstream` | on | Pin ClinePass `chat/completions` to a fixed upstream channel. |
+| `ipv6-first` | on | Resolve IPv6 first for outbound requests, falling back to IPv4 per address. |
+| `plugin-bridge` | on | Expose installed OMP plugins to the auth-gateway model registry and supply credentials. |
+| `models-bridge` | on | Expose custom models from `models.yml` to the auth-gateway model registry. |
+| `traffic-log` | **off** | Log every inbound gateway request to a rolling hourly JSONL file. |
+| `kiro-credential-sync` | on | Sync kiro-cli's rotated token into the auth-broker credential store. |
 
-`plugin-bridge` supplies credentials in memory only. Two features do write to
-OMP's agent database: `kiro-credential-sync` updates the existing `kiro`
-credential row, and `antigravity-account-routing` asks the auth-broker to refresh
-tokens that are about to expire. Providers OMP marks invalid (for example after a
-failed token refresh) are left alone on purpose: fix those with `/login`.
+Features install in four phases, which also fixes their order in the request
+path:
+
+| Phase | Features |
+| --- | --- |
+| `edge` | `gateway-compat`, `sse-heartbeat`, `reasoning-order` |
+| `outbound` | `tool-id-hash`, `antigravity`, `copilot-auto`, `lazy-router`, `cline-pin-upstream`, `ipv6-first` |
+| `process` | `plugin-bridge`, `models-bridge`, `traffic-log` |
+| `background` | `kiro-credential-sync` |
+
+`lazy-router` and `traffic-log` install in the phases above, but each
+self-disables outside the gateway process: virtual routes and inbound request
+logging have no meaning in the broker or a plain session.
+
+An interactive `omp` session installs only the `outbound` and `process` phases
+(no server edge and no long-lived watchers). `preload.mjs` installs everything.
+
+`antigravity` writes no tokens. `plugin-bridge` supplies credentials in memory
+only. `kiro-credential-sync` updates the existing `kiro` credential row, and the
+account-routing part of `antigravity` asks the auth-broker to refresh expiring
+tokens. Routing state, including Antigravity account cooldowns, lives in the one
+shared database named by the top-level `stateDbPath`.
 
 ## Requirements
 
-- [Bun](https://bun.sh) 1.2 or newer (OMP runs on Bun, and the shims use `Bun.serve`
-  and `bun:sqlite`).
+- [Bun](https://bun.sh) **1.4.4 or newer**. OMP runs on Bun, and the shims use
+  `Bun.serve`, `Bun.stdin`, and `bun:sqlite`.
 - An OMP installation with its auth-broker and auth-gateway.
-- systemd, if you want to run the services with the provided unit templates.
+- Linux or macOS. The systemd templates apply to Linux only.
+- systemd, if you run the services with the provided units.
 
 ## Install
 
-The examples assume the package lives at `~/.omp/plugins/omp-shims` and is listed
-in the plugins workspace manifest (`~/.omp/plugins/package.json`):
+The examples assume the package lives at `~/.omp/plugins/omp-shims` and is
+listed in the plugins workspace manifest (`~/.omp/plugins/package.json`):
 
 ```sh
 git clone https://github.com/PamelaSprin47685ghall/omp-shims.git ~/.omp/plugins/omp-shims
@@ -73,224 +95,141 @@ bun install
 ```
 
 An interactive `omp` session picks the plugin up through its `omp.extensions`
-entry. The gateway and the broker load it through Bun's preload mechanism, so
-they must be started with both entry points, in this order:
-
-```
-registry-capture.js   installs the host-export hook; must be first
-preload.js            resolves config and installs the enabled features
-```
-
-### systemd units
-
-Two units are provided: the broker (which owns credentials) and the gateway.
-The CLI prints them with the paths for the current account filled in:
+entry (`index.mjs`). The gateway and the broker load the package through Bun's
+preload mechanism, with **both** entries and in this order:
 
 ```sh
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js systemd omp-auth-broker \
-  | sudo tee /etc/systemd/system/omp-auth-broker.service > /dev/null
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js systemd omp-auth-gateway \
-  | sudo tee /etc/systemd/system/omp-auth-gateway.service > /dev/null
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now omp-auth-broker.service omp-auth-gateway.service
+registry-capture.mjs   installs the host-export hook; must come first
+preload.mjs            resolves the config and installs the enabled features
 ```
 
-The templates in [`systemd/`](systemd) use `@OMP_BIN@` and `@SHIMS_PRELOAD@`
-placeholders, which the CLI fills in from your home directory, so the printed
-unit is installable as-is on any account. The raw environment line is also
-available on its own:
+Set one variable for both processes:
 
 ```sh
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js env
+BUN_OPTIONS="--preload $PWD/registry-capture.mjs --preload $PWD/preload.mjs"
 ```
 
-Do not put provider API keys in the unit. Use `omp /login`, which writes to the
-agent's credential store where the gateway already looks.
-
-### Re-enabling paused Google Antigravity
-
-OMP 18.18.6 added a `disabled` auth rule for `google-antigravity`:
-Google may restrict accounts that use Antigravity outside its own apps, so the
-provider is paused. The rule hides it from every login list, rejects its
-credentials and refuses its requests; the code, model catalog and stored
-credentials remain. `antigravity-unpause.js` removes that flag and registers the
-provider's built-in OAuth definition as a runtime provider, which re-enables
-login, `/model`, `omp token` and `omp models`:
-
-```sh
-BUN_OPTIONS="--preload $HOME/.omp/plugins/omp-shims/antigravity-unpause.js" \
-  omp login google-antigravity
-
-# or, through the CLI:
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js antigravity-login
-```
-
-To include the preload in the generated broker/gateway units, set
-`OMP_SHIMS_ANTIGRAVITY_UNPAUSE=1` while printing them:
-
-```sh
-OMP_SHIMS_ANTIGRAVITY_UNPAUSE=1 bun ~/.omp/plugins/omp-shims/bin/omp-shims.js systemd omp-auth-broker
-OMP_SHIMS_ANTIGRAVITY_UNPAUSE=1 bun ~/.omp/plugins/omp-shims/bin/omp-shims.js systemd omp-auth-gateway
-```
-
-This is deliberately opt-in: no systemd unit or plugin entry preloads the file.
-Google restricts accounts that use Antigravity outside its own apps, so
-re-enabling the provider can get the account banned.
-
-### Multiple workers
-
-One gateway process serves every request on a single JavaScript thread, so
-throughput is bounded by per-request CPU. Several workers can share the same
-listen address: set `OMP_SHIMS_REUSE_PORT=1` in every worker and let the kernel
-spread new connections (`SO_REUSEPORT`). Each connection then stays on the
-worker that accepted it, which is what keeps prompt-cache affinity.
-
-A template unit is the shortest path:
-
-```ini
-# /etc/systemd/system/omp-auth-gateway@.service
-[Service]
-Environment="OMP_SHIMS_REUSE_PORT=1"
-Environment="OMP_SHIMS_LAZY_PERF_STATE_PATH=/root/.omp/w%i-perf.json"
-Environment="OMP_SHIMS_LAZY_CYCLIC_SPEED_STATE_PATH=/root/.omp/w%i-speed.json"
-Environment="OMP_SHIMS_LAZY_CONCURRENCY_PROOF_STATE_PATH=/root/.omp/w%i-proof.json"
-Environment="OMP_SHIMS_LAZY_EVENT_LOG_PATH=/root/.omp/logs/lazy-router-w%i.jsonl"
-ExecStart=/root/.local/bin/omp auth-gateway serve --bind=127.0.0.1:4000
-```
-
-Every piece of routing state is shared, with eventual consistency (each worker
-refreshes its view every couple of seconds; writes are write-through):
-
-| File | Shared state |
-| --- | --- |
-| `~/.omp/lazy-router-health.sqlite` | cooldowns, probe leases |
-| `~/.omp/lazy-router-state.sqlite` | in-flight semaphore, admission windows, Antigravity account cooldowns, perf window and history, cyclic speed statistics (one row per worker, summed on read), concurrency proofs (shared generation intervals — first token to end — so the number is gateway-wide), affinity prefixes |
-| `~/.omp/lazy-router-token-totals.sqlite` | usage totals, so the status page reports the whole gateway |
-| `~/.omp/logs/lazy-router.jsonl` | one event log for every worker, rotated at 64 MiB |
-
-The former per-worker files (`lazy-router-perf.json`, `-cyclic-speed.json`,
-`-concurrency-proof.json`, `lazy-router-wN-*.jsonl`) are no longer used when the
-shared store is enabled; they remain the fallback when it is not.
-
-- `~/.omp/lazy-router-health.sqlite` — cooldowns. Every worker mirrors the
-  rows, writes its own changes through, and only the worker that wins a row's
-  lease sends the recovery probe, so one interval means one probe for the whole
-  gateway.
-- `~/.omp/lazy-router-state.sqlite` — the in-flight semaphore per unit (with a
-  heartbeat and reaping, so a dead worker cannot hold slots), the admission
-  window of limited units, and Antigravity account cooldowns.
-- `~/.omp/lazy-router-token-totals.sqlite` — usage totals, so the status page
-  reports the whole gateway.
+The installed service units already contain that line. The install path must
+not contain whitespace: Bun's `BUN_OPTIONS` cannot quote a `--preload` path.
 
 ## Configuration
 
-Settings live in `~/.omp/shims.json` (override the path with `OMP_SHIMS_CONFIG`).
-They are resolved in this order, last wins:
-
-1. built-in defaults ([`lib/config.js`](lib/config.js));
-2. `~/.omp/shims.json`;
-3. environment variables.
-
-A feature entry may be a boolean or an object of settings:
+Settings live in `~/.omp/shims.json` (override the path with
+`OMP_SHIMS_CONFIG`). The v2 format is strict:
 
 ```json
 {
+  "version": 2,
+  "stateDbPath": null,
+  "runtime": { "thinkingLoopGuard": false },
   "features": {
-    "ipv6-first": true,
-    "antigravity-routing": { "enabled": true, "effort": "high" },
-    "antigravity-continuation": { "enabled": true, "maxContinuations": 3 },
-    "traffic-log": { "enabled": true, "dir": "/var/log/omp-gateway" },
-    "native-loop-guard": false
-  }
+    "lazy-router": { "enabled": true },
+    "antigravity": { "routing": true, "effort": "high" },
+    "traffic-log": { "enabled": true, "dir": "/var/log/omp-gateway" }
+  },
+  "pluginBridge": { "tokens": {} }
 }
 ```
 
-Changes take effect when omp or the service restarts.
+Resolution order for each feature, last wins:
 
-### Feature toggles
+1. the built-in defaults in [`lib/config.mjs`](lib/config.mjs);
+2. the entry in `shims.json`;
+3. `OMP_SHIMS_<FEATURE>` (see [Environment variables](#environment-variables)).
 
-Every feature can be switched per process with an environment variable
-(`on`/`off`, `1`/`0`, `true`/`false`, `yes`/`no`):
+A feature entry may be a boolean or an object. An object merges over its
+defaults. A corrupt file is an error, never a silent reset. Unknown top-level
+keys, unknown feature names, unknown feature settings, unknown `runtime` keys,
+unknown `pluginBridge` keys, and v1 legacy feature names are rejected with their
+full path. Only the declared open maps accept free keys:
+`lazy-router.providerHeaderTimeoutMs`, `lazy-router.upstreamHosts`,
+`lazy-router.maxInFlight`, `lazy-router.testFaults`, and
+`cline-pin-upstream.modelChannels`. When the strict check fails,
+`omp-shims status` still lists the unknown keys it found in the raw file.
 
-```sh
-OMP_SHIMS_ANTIGRAVITY_CONTINUATION=off omp
-```
+`runtime.thinkingLoopGuard` controls OMP's own thinking-loop guard in a
+long-lived service. The v2 default is `false`: the guard aborts a looping stream
+and retries the identical body, which reproduces the loop. An interactive
+session keeps the guard that OMP selected.
 
-| Feature | Environment variable |
-| --- | --- |
-| `ipv6-first` | `OMP_SHIMS_IPV6_FIRST` |
-| `antigravity-system-instruction` | `OMP_SHIMS_ANTIGRAVITY_SYSTEM_INSTRUCTION` |
-| `antigravity-routing` | `OMP_SHIMS_ANTIGRAVITY_ROUTING` |
-| `antigravity-continuation` | `OMP_SHIMS_ANTIGRAVITY_CONTINUATION` |
-| `antigravity-capture` | `OMP_SHIMS_ANTIGRAVITY_CAPTURE` |
-| `antigravity-account-routing` | `OMP_SHIMS_ANTIGRAVITY_ACCOUNT_ROUTING` |
-| `cline-pin-upstream` | `OMP_SHIMS_CLINE_PIN` |
-| `plugin-bridge` | `OMP_SHIMS_PLUGIN_BRIDGE` |
-| `models-bridge` | `OMP_SHIMS_MODELS_BRIDGE` |
-| `vendor-shims` | `OMP_SHIMS_VENDOR_SHIMS` |
-| `tool-id-hash` | `OMP_SHIMS_TOOL_ID_HASH` |
-| `copilot-auto` | `OMP_SHIMS_COPILOT_AUTO` |
-| `kiro-credential-sync` | `OMP_SHIMS_KIRO_CREDENTIAL_SYNC` |
-| `traffic-log` | `OMP_SHIMS_TRAFFIC_LOG` |
-| `lazy-router` | `OMP_SHIMS_LAZY_ROUTER` |
-| `sse-heartbeat` | `OMP_SHIMS_SSE_HEARTBEAT` |
-| `native-loop-guard` | `OMP_SHIMS_NATIVE_LOOP_GUARD` |
+Changes take effect when `omp` or the service restarts. For a multi-worker
+gateway, use the [zero-downtime rollout](#zero-downtime-worker-rollout) instead
+of restarting workers in place.
 
-### Per-feature settings
+### Feature settings
 
-| Feature | `shims.json` setting | Environment variable | Default |
-| --- | --- | --- | --- |
-| `ipv6-first` | `ttlMs` | `OMP_SHIMS_IPV6_TTL_MS` | `60000` |
-| `antigravity-routing` | `effort` | `OMP_SHIMS_AG_EFFORT` | `high` |
-| `antigravity-continuation` | `maxContinuations` | `OMP_SHIMS_AG_CONTINUE_MAX` | `3` |
-| | `locationRetries` | `OMP_SHIMS_AG_LOCATION_RETRIES` | `3` |
-| | `idleTimeoutMs` (0 = none) | `OMP_SHIMS_AG_IDLE_TIMEOUT_MS` | `0` |
-| | `out` | `OMP_SHIMS_AG_DIAG_OUT` | `~/.omp/logs/antigravity-continuation.jsonl` |
-| | | `OMP_SHIMS_AG_HASH_SALT` | built in |
-| `antigravity-capture` | `out` | `OMP_SHIMS_AG_CAPTURE_OUT` | `~/.omp/logs/antigravity-streams.jsonl` |
-| | `sampleEvery` (0 = failures only) | `OMP_SHIMS_AG_CAPTURE_SAMPLE` | `0` |
-| `antigravity-account-routing` | `ultraAccounts`, `proAccounts`, `cooldownMs`, `ultraModelPattern`, `out` | `OMP_SHIMS_AG_ACCOUNTS_OUT` | none, none, `60000`, `gemini-4\|opus\|sonnet`, `~/.omp/logs/antigravity-accounts.jsonl` |
-| `cline-pin-upstream` | `host` | `OMP_SHIMS_CLINE_PIN_HOST` | `api.cline.bot` |
-| | `upstream` | `OMP_SHIMS_CLINE_PIN_UPSTREAM` | `openai-compatible-private` |
-| | `models` (comma list, empty = all) | `OMP_SHIMS_CLINE_PIN_MODELS` | empty |
-| | `modelChannels` | | `deepseek-v4.1-flash → deepseek` |
-| | `apiKey` | `OMP_SHIMS_CLINE_API_KEY` | none |
-| `tool-id-hash` | | `OMP_SHIMS_TOOL_ID_SALT` | empty |
-| `copilot-auto` | `apiVersion` | `OMP_SHIMS_COPILOT_API_VERSION` | `2026-08-01` |
-| `kiro-credential-sync` | `dbPath` | `OMP_SHIMS_KIRO_SYNC_DB` | `~/.local/share/kiro-cli/data.sqlite3` |
-| | `pollMs` | `OMP_SHIMS_KIRO_SYNC_POLL` | `60000` |
-| `traffic-log` | `dir` | `OMP_SHIMS_TRAFFIC_LOG_DIR` | `~/.omp/gateway-logs` |
-| | `maxAgeMs` | `OMP_SHIMS_TRAFFIC_LOG_MAX_AGE_MS` | `3600000` |
-| | `sweepMs` | | `300000` |
-| | | `OMP_SHIMS_TRAFFIC_LOG_BODY=0` omits bodies | bodies logged |
-| `plugin-bridge` | `pluginsDir`, `plugins` (allow-list) | | `~/.omp/plugins`, all |
-| `models-bridge` | `modelsPath` | `OMP_SHIMS_MODELS_PATH` | `~/.omp/agent/models.yml` |
-| `models-bridge` | `excludeProviders` | — | `[]` (providers present in synced models.yml but intentionally not registered on this host) |
-| `vendor-shims` | `pluginsDir` | `OMP_SHIMS_VENDOR_SKIP=1` skips it | `~/.omp/plugins` |
-| `lazy-router` | `routesFile`, `holidaysFile` | | bundled `lib/lazy-router/*.json` |
-| | | `OMP_SHIMS_REUSE_PORT=1` shares one listen address between workers | off |
-| | `out` | `OMP_SHIMS_LAZY_EVENT_LOG_PATH` | `~/.omp/logs/lazy-router.jsonl` |
-| | | `OMP_SHIMS_LAZY_EVENT_LOG_MAX_BYTES` (0 = never rotate) | `67108864` |
-| | `perfStatePath`, `speedStatePath`, `concurrencyProofStatePath` | `OMP_SHIMS_LAZY_PERF_STATE_PATH`, `OMP_SHIMS_LAZY_CYCLIC_SPEED_STATE_PATH`, `OMP_SHIMS_LAZY_CONCURRENCY_PROOF_STATE_PATH` | `~/.omp/lazy-router-*.json` |
-| | `healthDbPath` | `OMP_SHIMS_LAZY_HEALTH_DB_PATH` | `~/.omp/lazy-router-health.sqlite` |
-| | `stateDbPath` | `OMP_SHIMS_LAZY_STATE_DB_PATH` | `~/.omp/lazy-router-state.sqlite` |
-| | | `OMP_SHIMS_PROFILE=1` prints per-stage CPU per window | off |
-| | `probeIntervalMs`, `probeTimeoutMs` | | `1800000`, `90000` |
-| | `tierRefreshMs`, `tierRecheckMs` | | `21600000`, `60000` |
-| | `headerTimeoutMs`, `providerHeaderTimeoutMs` | | `300000`, `{ "commandcode": 1800000 }` |
-| | `statusPath` | | `/v1/lazy/status` |
-| | `codexHttpTransport` (sets `PI_CODEX_WEBSOCKET=0`) | | `true` |
-| | `out`, `logUpstreamBody` | | none, `false` |
-| | `maxInFlight` (merged over routes.json) | | `{}` (routes.json: `ollama-cloud: 3`) |
-| | `affinityTtlMs`, `affinityMaxEntries`, `affinityMinPrefixBytes` | | `300000`, `50000`, `1024` |
-| | `admissionWindowMs` | | `300000` |
-| `sse-heartbeat` | `intervalMs` | | `15000` |
+The tables list the settings that the v2 features read. Omitted values take the
+default shown.
 
-### Plugin credentials
+#### Edge and transport
 
-`plugin-bridge` can supply a token for each plugin provider it registers. Declare
-them in the top-level `pluginBridge` section; nothing is hardcoded in the package.
+| Feature | Setting | Default |
+| --- | --- | --- |
+| `gateway-compat` | `enabled` | `true` |
+| `sse-heartbeat` | `enabled`, `intervalMs` | `true`, `15000` |
+| `reasoning-order` | `enabled`, `maxBufferBytes` | `true`, `16777216` |
+| `tool-id-hash` | `enabled`, `salt` | `true`, `""` |
+| `ipv6-first` | `enabled`, `ttlMs` | `true`, `60000` |
+
+#### Antigravity
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Master switch for the unified shim. |
+| `systemInstruction` | `true` | Send the system prompt as a leading user turn. |
+| `routing` | `false` | Route Flash models to the upstream `-tiered` variants. |
+| `effort` | `"high"` | Thinking level when the caller asks for none. |
+| `continuation` | `true` | Recover turns that end thought-only, malformed, or truncated. |
+| `maxContinuations` | `3` | Extra continuations after the first turn. |
+| `locationRetries` | `3` | Retries when upstream rejects the region. |
+| `idleTimeoutMs` | `0` | Stream idle timeout; `0` disables it. |
+| `capture` | `false` | Write stream diagnostics to a JSONL file. |
+| `captureOut` | `null` | Capture file; `null` uses `~/.omp/logs/antigravity-streams.jsonl`. |
+| `sampleEvery` | `0` | Capture every Nth stream; `0` records failures only. |
+| `accountRouting` | `true` | Route by account tier. |
+| `ultraAccounts`, `proAccounts` | `[]` | Account e-mail addresses per tier. |
+| `cooldownMs` | `60000` | Account cooldown after a 429. |
+| `ultraModelPattern` | `"gemini-4\|opus\|sonnet"` | Models reserved for Ultra accounts. |
+| `accountsOut` | `null` | Account routing log. |
+| `continuationOut` | `null` | Continuation diagnostics log. |
+
+The account-routing part matches accounts in OMP's `agent.db` by e-mail
+address. With no `ultraAccounts`, Ultra-only models use the gateway's own
+credential. With no `proAccounts`, every account that is not an Ultra account
+counts as Pro.
+
+#### Provider features
+
+| Feature | Setting | Default |
+| --- | --- | --- |
+| `copilot-auto` | `enabled`, `apiVersion` | `true`, `"2026-08-01"` |
+| `cline-pin-upstream` | `enabled` | `true` |
+| | `host` | `"api.cline.bot"` |
+| | `baseURL` | `"https://api.cline.bot/api/v1"` |
+| | `upstream` | `"openai-compatible-private"` |
+| | `modelChannels` | `presets/cline.json` `modelChannels` |
+| | `models` | `""` (all models) |
+| | `apiKey` | `null` |
+| `kiro-credential-sync` | `enabled`, `dbPath`, `pollMs` | `true`, kiro-cli default, `60000` |
+
+Do not put API keys in a systemd unit. `cline-pin-upstream.apiKey` and
+`pluginBridge.tokens` are the only places in this package that accept a
+credential, and `~/.omp/shims.json` must stay readable by its owner only.
+
+#### Plugin and model bridges
+
+| Feature | Setting | Default |
+| --- | --- | --- |
+| `plugin-bridge` | `enabled` | `true` |
+| | `pluginsDir` | `~/.omp/plugins` |
+| | `plugins` | `null` (all installed plugins) |
+| | `eagerTimeoutMs` | `15000` |
+| `models-bridge` | `enabled` | `true` |
+| | `modelsPath` | `~/.omp/agent/models.yml` |
+| | `excludeProviders` | `[]` |
+
+`plugin-bridge` can supply one token per plugin provider. Declare the tokens in
+the top-level `pluginBridge` section:
 
 ```json
 {
@@ -308,254 +247,423 @@ them in the top-level `pluginBridge` section; nothing is hardcoded in the packag
 }
 ```
 
-Supported token sources: `value` (literal), `env`, `json` (a file plus a dotted
-`path`), and `sqlite` (a file plus a query returning one text column). Omit a
-provider entirely to let OMP resolve its own credential.
+Supported token sources: `value` (literal), `env`, `json` (a file and a dotted
+`path`), and `sqlite` (a file and a query that returns one text column). Omit a
+provider to let OMP resolve its own credential.
 
-### Antigravity account routing
+#### Traffic log
 
-Models matching `ultraModelPattern` (Gemini 4, Claude Opus and Sonnet by default;
-Pro accounts list Gemini 4 but cannot serve it) are sent only to the accounts in
-`ultraAccounts`; everything else goes to `proAccounts` first and falls back to the
-Ultra accounts. The bundled `lazy-router` tables follow the same split: their
-Gemini 4 entry takes Ultra accounts only, their Gemini 3.8 Flash entries Pro
-accounts first, then Ultra. Within a tier one account is used
-until it returns 429, then it cools down and the next one takes over. Accounts are
-read from OMP's `agent.db`, matched by e-mail address.
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Master switch. |
+| `dir` | `~/.omp/gateway-logs` | Output directory. |
+| `maxAgeMs` | `3600000` | Delete files older than one hour. |
+| `sweepMs` | `300000` | Sweep interval. |
+| `logBody` | `false` | Include request bodies. |
 
-No accounts are built in, so list yours:
+Bodies can contain prompts and tool output. Keep `logBody` off unless you need
+it, and treat the log directory as sensitive.
 
-```json
-{
-  "features": {
-    "antigravity-account-routing": {
-      "ultraAccounts": ["ultra@example.com"],
-      "proAccounts": ["pro-1@example.com", "pro-2@example.com"]
-    }
-  }
-}
-```
+#### Lazy router
 
-With no `ultraAccounts`, Ultra-only models use the gateway's own credential. With
-no `proAccounts`, every account that is not an Ultra account counts as Pro.
+`lazy-router` is off by default. Its settings:
 
-### Lazy router
+The bundled preset exposes four routes: `lazy/pro` (rating over the Kiro and
+Antigravity Opus/Gemini 4 units), `lazy/weak` (a 250K-context text route),
+`lazy/default` (Terra, Plus then Pro then API), and `lazy/task` (a DeepSeek
+rating across providers). There is no `rush/*` family and no `lazy/vision` route
+in v2.
 
-`lazy-router` publishes three virtual models in `/v1/models` (500k context, 64k
-output; only `lazy/vision` accepts images). A request for one of them is routed to
-the first healthy *unit* in its route table, where a unit is one provider plus one
-account.
+| Setting | Default |
+| --- | --- |
+| `enabled` | `false` |
+| `store` | `"sqlite"` |
+| `routesFile`, `holidaysFile` | `null` (bundled presets) |
+| `statusPath` | `"/v1/lazy/status"` |
+| `clientOnlyPrefix` | `"lazy/"` |
+| `allowNonChatPassThrough` | `true` |
+| `probeIntervalMs`, `probeTimeoutMs` | `1800000`, `90000` |
+| `probePrompt`, `probeMaxTokens` | `"Reply OK"`, `32` |
+| `tierRefreshMs`, `tierRecheckMs` | `21600000`, `60000` |
+| `headerTimeoutMs` | `300000` |
+| `providerHeaderTimeoutMs` | `{ "commandcode": 1800000 }` |
+| `upstreamHosts` | `{}` |
+| `codexHttpTransport` | `true` |
+| `logUpstreamBody` | `false` |
+| `maxInFlight` | `{}` |
+| `affinityTtlMs`, `affinityMaxEntries`, `affinityMinPrefixBytes` | `300000`, `50000`, `1024` |
+| `admissionWindowMs` | `300000` |
+| `perfHistoryHalfLifeMs`, `perfHistoryWeightCap` | `86400000`, `8` |
+| `out` | `null` (`~/.omp/logs/lazy-router.jsonl`) |
+| `testFaults` | `{}` |
+| `routing` | documented weights and constants |
 
-- **Accounts by tier**: route entries name a model and, optionally, the account
-  tiers they want (`"tier": "plus"`, `"tier": ["ultra", "pro"]`); they never name
-  accounts. At runtime an entry expands into one unit per enabled `agent.db`
-  account of that provider and tier: tiers in the order listed, accounts oldest
-  first (ascending credential id = creation order). An entry without `tier` takes
-  every account of the provider. New or removed logins are picked up within a
-  minute, without a config change.
-- **Tier detection**: OpenAI Codex reads the ChatGPT plan claim of the OAuth
-  token; Google Antigravity asks Cloud Code Assist for the account's paid tier
-  (re-checked every `tierRefreshMs`). Other providers have no tiers. An account
-  whose tier cannot be read is matched only by entries without `tier`, and is
-  logged once.
-- **Pinning**: a provider with two or more accounts gets one unit per account,
-  each pinned to its credential. A provider with one account, or none in
-  `agent.db` (for example a key in `models.yml`), is a single unit served by the
-  gateway's own credential.
-- **Labels**: units are named `provider:tier#n` (`openai-codex:plus#1`,
-  `google-antigravity:pro#2`), `provider#n` without a tier, or just `provider`
-  for a single unit; `n` counts accounts of that provider and tier, oldest first.
+The shared state database is the top-level `stateDbPath` setting. `null` or an
+absent value means `~/.omp/omp-shims-state.sqlite`. It holds cooldowns,
+admission windows, account cooldowns, performance history, speed statistics,
+concurrency proofs, and affinity prefixes. Several workers may share it.
 
-- **Peak hours**: route tables differ between peak (Beijing time, Mon to Fri,
-  09:00-12:00 and 14:00-18:00 on working days) and off-peak. Weekends, public
-  holidays and adjusted make-up working days (调休) follow the bundled
-  `holidays-cn.json`; years marked `"estimate"` are a best guess until the State
-  Council publishes the official schedule.
-- **Effort**: entries marked `capped` get `min(requested, medium)`, entries naming
-  a level (`"effort": "low"`) always get that level, others `high`; stepped down to
-  the nearest level the model supports. Effort and `max_tokens = 64000` are always
-  sent explicitly, in each API format's own field. `modelTraits` corrects a model's
-  reasoning traits where the provider plugin's catalog is wrong; for providers
-  whose plugin drops the effort of such a model (Command Code), the attempt layer
-  writes it into the provider body itself (`lib/lazy-router/upstream-effort.js`).
-- `lazy-router`: rolling per-model serving performance. Every streamed answer —
-  routed or a direct model id — is measured for first-token latency (request to
-  the first event only the model can produce, not the gateway's own preamble)
-  and generation speed (the provider's own output-token total over the time
-  those tokens took), plus the average total request duration, which counts
-  every measured answer, streamed or delivered whole. Sums live in one-minute
-  buckets over a 30-minute window, so a long answer weighs what it should and a
-  fixed model recovers inside the window. `GET /v1/lazy/status` exposes them as
-  `perf`, the page shows three columns per route row plus a per-model table, and
-  chat streams now ask for `stream_options.include_usage` so the token totals
-  exist to measure. A model with more than 100 samples in the window and an
-  average total duration above 10 s (`degradeMinSamples` / `degradeTotalMs`) is
-  marked degraded: its rows turn red, and the router tries every healthy unit in
-  table order before any degraded one. A prefix-affinity match still outranks
-  the rule, so a warm prefix keeps its unit even while that model is red. The
-  verdict is latched for 30 minutes (`degradeHoldMs`), so a model near the
-  ceiling cannot flap between the two groups; after the period the window decides
-  again and a still-slow model is latched for another period.
-- `lib/credential-pin.js`: request-scoped credential pins that other features honour.
-- **Failure handling**: the verdict is taken on the upstream status, before a byte
-  is streamed, and the reaction depends on whose fault the failure was
-  (`lib/lazy-router/failures.js`). A client that closed the request (or a gateway
-  `499`) ends it at once: no probe, no cooldown, no further unit. A provider call
-  whose connection closed before any answer (a stale keep-alive socket) is
-  retried once at once on a fresh connection. An exhausted quota (`402`, or
-  quota wording such as Qoder's `错误码 110`, whatever status wraps it) cools the
-  unit+model without a probe and the next unit is tried. Any other failure is
-  probed with `Reply OK`; if the probe fails the unit+model cools down (re-probed
-  every `probeIntervalMs`) and the next unit is tried at once; if the probe
-  succeeds the same unit is retried once. When every unit fails, the last
-  upstream error is returned. There is no load balancing: a
-  unit that recovers takes its traffic back with the next new conversation.
-- **Prefix-cache affinity**: each request is reduced to a canonical transcript
-  (system, user and assistant text, thinking, images by digest, tool calls with
-  sorted-key arguments, tool results; no ids, `cache_control`, sampling or limits),
-  identical across the three API formats, as UTF-8 bytes. After a request is
-  served, the digest of the first half of those bytes is recorded against the
-  unit for `affinityTtlMs` (5 minutes, refreshed on a hit; at most
-  `affinityMaxEntries`; prefixes under `affinityMinPrefixBytes` are not kept).
-  A later request that starts with a recorded prefix tries that unit first (the
-  longest match wins), so the provider's prompt cache keeps paying off. Lookup
-  hashes the request once, snapshotting the digest at every recorded length. Only
-  `(length, digest) → unit` is stored, never content.
-- **Concurrency limits**: `maxInFlight` in `routes.json` (or `shims.json`, merged
-  over it) caps the upstream requests one unit may have open, by `provider` or
-  `provider:tier`; 0 or absent means unlimited, and an unlimited unit is never
-  gated. Only `ollama-cloud` is limited (3 per key). A request counts from the
-  moment it is routed (a reservation) and, at the outbound fetch layer, from the
-  provider call leaving until its response body has been read or closed, it
-  failed, or it was aborted; probes count but are never gated. A full unit is
-  skipped.
-- **Cache-aware admission**: a limited unit with `maxInFlight = m` that saw `N`
-  requests in the last `admissionWindowMs` (5 minutes) admits a request only when
-  its cached share there, `x = matched length / request length`, is among the
-  best `m / N` of that window (at or above the `1 - m/N` quantile; ties admitted;
-  everyone while `m >= N`). New conversations thus overflow to the next unit
-  instead of crowding out the ones that unit's cache serves.
-- **Observability**: the response carries `x-lazy-router-unit` and
-  `x-lazy-router-model`; structured events go to stderr (and to `out` as JSONL);
-  `GET /v1/lazy/status` shows the current period, the units and, per route, each
-  candidate's health, cooldown reason (status code only) and next probe time,
-  the in-flight load of limited units and the affinity map's size and hit rate.
-  It holds no account ids, e-mails, keys or upstream error text, so it is served
-  without the gateway token.
-- **Status page**: `GET /` serves a page rendered on the server from the status
-  data (so it shows the full state even without JavaScript), light/dark, with a
-  strict same-origin CSP. Its stylesheet and script live under
-  `/assets/lazy-status/`; the script refreshes the view from the status JSON every
-  10 seconds. It shows the current period and next switch, and per route the
-  units that can serve it, in order, with the serving one highlighted, health,
-  cooldown reason and probe countdown, `并发 n/m` on limited units, and the
-  affinity entries and hit rate in the header. The page, its assets and the status JSON
-  are the only paths answered without the gateway token.
+### Preset policy
 
-```json
-{ "features": { "lazy-router": { "enabled": true } } }
-```
+Live policy is data, not code. The bundled presets live in
+[`presets/`](presets):
 
-Point `routesFile` at your own copy of `routes.json` to change the tables. The
-router runs only in the `auth-gateway` process (shims.json is shared with the
-broker and interactive sessions). While it is on, OpenAI Codex uses HTTP/SSE
-instead of its pooled WebSocket so the credential pin applies
-(`codexHttpTransport: false` opts out).
+| File | Contents |
+| --- | --- |
+| `routes.json` | Routes, `peakWindows`, `clientOnlyPrefix`, and `providerHeaderTimeouts`. |
+| `ranking.json` | Every routing weight and constant, plus `excellentPrior`/`mediumPrior` v1 provenance. |
+| `antigravity.json` | `tieredPattern` and `ultraModelPattern`. |
+| `copilot.json` | `apiVersion` and `autoBootstrapModel`. |
+| `cline.json` | ClinePass `host`, `baseURL`, `upstream`, and `modelChannels`. |
+| `adapters.json` | `upstreamEffortWriter` per provider and `requiresAttemptTrust`. |
+| `offpeak.json` | Vendor off-peak `schedules`. |
+| `rates.json` | Official list `rates`, with their `asOf` date, used for API-equivalent pricing. |
+| `holidays-cn.json` | Mainland China holiday calendar for peak detection. |
 
-### SSE heartbeat
+`lazy-router.routesFile` and `lazy-router.holidaysFile` accept your own
+replacements. Other preset policy is package data; where a feature exposes the
+setting, override it per feature in `shims.json`. Code contains no concrete
+model id, model-family pattern, route prefix, provider/channel host, or API
+version: all live policy is edited in presets or overridden per feature in
+`shims.json`.
 
-`sse-heartbeat` keeps quiet event streams alive between the gateway and its
-clients. When a `text/event-stream` response (lazy or not, any API format) has
-written nothing for `intervalMs` (default 15 s), it writes the SSE comment line
-`: keep-alive` followed by a blank line. Conforming SSE parsers ignore comments;
-the OpenAI and Anthropic SDKs and OMP's own client were checked.
+## Environment variables
 
-- The comment is written only between events (the last forwarded bytes end with
-  a blank line), so an event is never split.
-- The source is read only when the client asks for more data, nothing is
-  buffered, and the idle clock restarts on every forwarded chunk. The timer stops
-  when the stream ends, errors, or the client goes away.
-- Its `Bun.serve` wrap is the outermost one, so it only sees a response once the
-  handlers inside have decided it: the lazy router's failover still happens
-  before the first byte.
-- SSE responses also get `X-Accel-Buffering: no` and `Cache-Control: no-transform`
-  (`no-cache` when none was set). Other responses are untouched.
+v2 reads a small allow-list. Every other `OMP_SHIMS_*` variable is legacy; the
+CLI reports it and the runtime ignores it.
 
-```json
-{ "features": { "sse-heartbeat": { "enabled": true, "intervalMs": 15000 } } }
-```
+Feature toggles accept `true`/`false`, `1`/`0`, `on`/`off`, and `yes`/`no`
+(case-insensitive, trimmed). Any other value is ignored.
+
+| Feature | Variable |
+| --- | --- |
+| `gateway-compat` | `OMP_SHIMS_GATEWAY_COMPAT` |
+| `sse-heartbeat` | `OMP_SHIMS_SSE_HEARTBEAT` |
+| `reasoning-order` | `OMP_SHIMS_REASONING_ORDER` |
+| `tool-id-hash` | `OMP_SHIMS_TOOL_ID_HASH` |
+| `antigravity` | `OMP_SHIMS_ANTIGRAVITY` |
+| `copilot-auto` | `OMP_SHIMS_COPILOT_AUTO` |
+| `lazy-router` | `OMP_SHIMS_LAZY_ROUTER` |
+| `cline-pin-upstream` | `OMP_SHIMS_CLINE_PIN_UPSTREAM` |
+| `ipv6-first` | `OMP_SHIMS_IPV6_FIRST` |
+| `plugin-bridge` | `OMP_SHIMS_PLUGIN_BRIDGE` |
+| `models-bridge` | `OMP_SHIMS_MODELS_BRIDGE` |
+| `traffic-log` | `OMP_SHIMS_TRAFFIC_LOG` |
+| `kiro-credential-sync` | `OMP_SHIMS_KIRO_CREDENTIAL_SYNC` |
+
+Other supported variables:
+
+| Variable | Meaning |
+| --- | --- |
+| `OMP_SHIMS_CONFIG` | Config file path. |
+| `OMP_SHIMS_VERBOSE=1` | Log what each feature does. |
+| `OMP_SHIMS_REUSE_PORT=1` | Let several gateway workers bind one address. |
+
+Sub-option environment variables from v1 — `OMP_SHIMS_AG_*`,
+`OMP_SHIMS_TRAFFIC_LOG_DIR`, `OMP_SHIMS_LAZY_*_PATH`,
+`OMP_SHIMS_MODELS_PATH`, `OMP_SHIMS_VENDOR_SKIP` — are not read in v2. Put
+those settings in `shims.json`. `omp-shims status` and `doctor` name every
+legacy variable they see, without printing its value.
 
 ## CLI
 
+Run the CLI with Bun:
+
 ```sh
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js status              # every feature and its state
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js disable antigravity-continuation
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js enable traffic-log
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js env                 # the BUN_OPTIONS line for a unit
-bun ~/.omp/plugins/omp-shims/bin/omp-shims.js systemd omp-auth-gateway
+bun ~/.omp/plugins/omp-shims/bin/omp-shims.mjs <command>
 ```
 
-Inside an interactive omp session, `/omp-shims` shows the same status and
+| Command | Purpose |
+| --- | --- |
+| `--version`, `-v` | Print the version. |
+| `--help`, `-h`, `help` | Print usage. |
+| `status [--json]` | Show every feature, its state, its source (`default`, `config`, `env`), ignored legacy env vars, and unknown keys in the raw file. |
+| `doctor` | Check that the config is readable and owner-only (no group/other permission bits), validate the schema, run `PRAGMA quick_check` and `user_version` on the state database, and check host exports. Prints PASS/FAIL per check; exits 1 on a FAIL. |
+| `enable <feature>` | Turn a feature on in the file. |
+| `disable <feature>` | Turn a feature off in the file. |
+| `env` | Print the systemd `BUN_OPTIONS` line. |
+| `systemd [unit]` | Print a unit with the current account's paths: `omp-auth-gateway`, `omp-auth-gateway@`, or `omp-auth-broker`. |
+| `add-account <provider> <plugin-package>` | Read a token from stdin without echo, back up `agent.db`, and add or update the account. |
+| `repair-identities <provider>` | Give accounts stored with a placeholder identity their own identity. |
+| `uninstall [--dry-run\|--clean] [--yes]` | List generated state, or remove it with `--clean --yes`. |
+
+`enable` and `disable` warn when `OMP_SHIMS_<FEATURE>` is set: the environment
+wins over the file until you unset it.
+
+The host-export check PASSes in a standalone CLI process, where the hook is not
+installed by design. When `doctor` runs inside an `auth-gateway` or `auth-broker`
+process, a missing `globalThis.__OMP_SHIMS_HOST__` is a FAIL.
+
+`add-account` reads the token with `stty -echo` on a TTY and always restores
+the terminal settings. It never prints the token. Before writing, it copies
+`agent.db` (and its `-wal`/`-shm` sidecars) to
+`agent.db.bak-<UTC timestamp>`.
+
+`uninstall --clean --yes` removes only files this package generated: the config,
+the state database and its sidecars, and the known log files and traffic-log
+directory. It prints the exact `systemctl` and `bun remove` steps; it never
+touches `agent.db`.
+
+Inside an interactive `omp` session, `/omp-shims` shows the same status and
 `/omp-shims <feature> on|off` toggles a feature.
+
+## Migration from v1
+
+The migration script is one-shot and idempotent. A dry run is the default.
+
+```sh
+# Stop both services first so no v1 database is being written.
+sudo systemctl stop 'omp-auth-gateway@*' omp-auth-gateway.service omp-auth-broker.service
+
+bun ~/.omp/plugins/omp-shims/scripts/migrate-v2.mjs --dry-run
+bun ~/.omp/plugins/omp-shims/scripts/migrate-v2.mjs --write
+bun ~/.omp/plugins/omp-shims/bin/omp-shims.mjs doctor
+```
+
+Options: `--config PATH`, `--state-dir PATH`, `--backup-dir PATH`.
+
+What the migration does:
+
+- Merges the five v1 `antigravity-*` features into `features.antigravity`.
+- Drops `features.vendor-shims`. There is no v2 feature with that job.
+- Drops `features.native-loop-guard` and writes its enabled value to
+  `runtime.thinkingLoopGuard`.
+- Carries `lazy-router.routing.excellentPrior` and `.mediumPrior` into the v2
+  routing block as inert provenance, and keeps the v1 `temperature` value. v2
+  ranks with the continuous intelligence weights.
+- Drops the v1 per-database paths (`healthDbPath`, `tokenTotalsPath`,
+  `perfStatePath`, `speedStatePath`, `concurrencyProofStatePath`) and writes the
+  merged database path to the top-level `stateDbPath`.
+- Keeps `pluginBridge.tokens` and every other key.
+- Merges `lazy-router-health.sqlite`, `lazy-router-state.sqlite`, and
+  `lazy-router-token-totals.sqlite` into `omp-shims-state.sqlite` with the
+  canonical v2 schema and `PRAGMA user_version = 2`, including rows still in the
+  WAL. It maps health as `cooling -> dead`, `until = 0` (until a probe
+  succeeds), and fills the v2 `reason_rank`, `fencing_token`, and lease columns.
+  It splits each v1 `totals.model` at the first `/` into the v2 `provider` and
+  `model` columns. It copies live affinity rows only. It creates `capacity`
+  empty and does not copy `worker_heartbeat` or `attempt`: v2 has no attempt
+  table, and copied in-flight slots would leak capacity.
+- Reads every v1 database with `readonly: true`, copies inside one transaction,
+  and skips a table that a source does not contain.
+- Backs up the config and every v1 database (with `-wal` and `-shm`) under
+  `~/.omp/omp-shims-backup-<timestamp>` before writing.
+- Validates the new config with `validateConfig`; on failure it exits 1 and
+  writes nothing.
+- Writes the new config `0600` through a temporary file and a rename.
+
+Run the script a second time: it reports `already v2` and changes nothing.
+
+After the migration, replace the installed units (the new templates add
+`UMask=0077` and the `omp-auth-gateway@` multi-worker unit), then start the
+services:
+
+```sh
+bun ~/.omp/plugins/omp-shims/bin/omp-shims.mjs systemd omp-auth-broker \
+  | sudo tee /etc/systemd/system/omp-auth-broker.service > /dev/null
+bun ~/.omp/plugins/omp-shims/bin/omp-shims.mjs systemd omp-auth-gateway \
+  | sudo tee /etc/systemd/system/omp-auth-gateway.service > /dev/null
+bun ~/.omp/plugins/omp-shims/bin/omp-shims.mjs systemd omp-auth-gateway@ \
+  | sudo tee /etc/systemd/system/omp-auth-gateway@.service > /dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now omp-auth-broker.service omp-auth-gateway.service
+```
+
+The v1 files stay on disk after the write. Remove them only after `doctor`
+passes and the gateway serves traffic.
+
+## systemd
+
+Two single-instance units and one template are provided:
+
+- `omp-auth-broker.service` owns credentials and listens on `127.0.0.1:8765`.
+- `omp-auth-gateway.service` serves `127.0.0.1:4000` and wants the broker.
+- `omp-auth-gateway@.service` is the multi-worker template. Every instance sets
+  `OMP_SHIMS_REUSE_PORT=1`, so the kernel spreads new connections across
+  workers. An optional `/etc/omp-shims/%i.env` file can override settings per
+  instance.
+
+All units run as the invoking account, use the account's home directory, set
+`UMask=0077`, and load both preload entries. `@OMP_USER@`, `@OMP_HOME@`,
+`@OMP_BIN_DIR@`, `@OMP_BIN@`, and `@SHIMS_PRELOAD@` are placeholders; the CLI
+fills them from the current account. The `env` command prints the preload line
+alone.
+
+To run four workers:
+
+```sh
+sudo systemctl enable --now omp-auth-gateway@{1..4}
+```
+
+`OMP_SHIMS_REUSE_PORT` is read by the gateway process only. Keep the broker as
+one instance.
+
+Do not put provider API keys in a unit. Use `omp /login`; it writes to the
+agent credential store where the gateway already looks.
+
+### Zero-downtime worker rollout
+
+Never `systemctl restart` a gateway worker in place for a code change: the
+restart drops that worker's listener, and restarting every worker drops them
+all. Use a blue-green rotation instead. Start a replacement worker, wait until
+it is healthy, then stop one old worker. Keep at least four listeners at all
+times.
+
+Run this `wait_healthy` check before every stop, and stop the old worker only
+when it passes:
+
+```sh
+wait_healthy() {
+  local id=$1 unit="omp-auth-gateway@$1" pid attempt
+  for attempt in $(seq 1 30); do
+    if systemctl is-active --quiet "$unit"; then
+      pid=$(systemctl show -p MainPID --value "$unit")
+      if [ -n "$pid" ] && [ "$pid" != 0 ] &&
+        ss -ltnp 'sport = :4000' | grep -q "pid=$pid," &&
+        curl -fsS -o /dev/null http://127.0.0.1:4000/healthz; then
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  return 1
+}
+```
+
+The helper retries once per second for up to 30 seconds.
+
+For a four-worker baseline (`@1` to `@4`), the proven sequence is:
+
+```sh
+(
+  sudo systemctl start omp-auth-gateway@5 && wait_healthy 5 && sudo systemctl stop omp-auth-gateway@1 || exit 1
+  sudo systemctl start omp-auth-gateway@6 && wait_healthy 6 && sudo systemctl stop omp-auth-gateway@2 || exit 1
+  sudo systemctl start omp-auth-gateway@7 && wait_healthy 7 && sudo systemctl stop omp-auth-gateway@3 || exit 1
+  sudo systemctl start omp-auth-gateway@8 && wait_healthy 8 && sudo systemctl stop omp-auth-gateway@4 || exit 1
+  sudo systemctl start omp-auth-gateway@1 && wait_healthy 1 && sudo systemctl stop omp-auth-gateway@5 || exit 1
+  sudo systemctl start omp-auth-gateway@2 && wait_healthy 2 && sudo systemctl stop omp-auth-gateway@6 || exit 1
+  sudo systemctl start omp-auth-gateway@3 && wait_healthy 3 && sudo systemctl stop omp-auth-gateway@7 || exit 1
+  sudo systemctl start omp-auth-gateway@4 && wait_healthy 4 && sudo systemctl stop omp-auth-gateway@8 || exit 1
+  sudo systemctl reset-failed omp-auth-gateway@5 omp-auth-gateway@6 omp-auth-gateway@7 omp-auth-gateway@8
+)
+```
+
+The invariant is: before a stop, five listeners answer; after the stop, four;
+after the next start, five again. It never falls below four. A listener here is
+an active `omp-auth-gateway@` unit whose `MainPID` owns a listening socket on
+the gateway port.
+
+The rollout observed 345 `/healthz` samples with 0 failures and a listener
+minimum of 4. That is empirical evidence from one rollout, not a mathematical
+guarantee. A worker is stopped only after its replacement is healthy, but a
+request already in flight on the stopped worker still needs a graceful drain. A
+strict zero-loss guarantee requires draining connections before exit.
 
 ## How it works
 
-Features that touch provider traffic are layers around the global `fetch`
-([`lib/fetch-chain.js`](lib/fetch-chain.js)). The first layer registered is the
-outermost; a layer can rewrite the request, observe the response, or answer on
-its own. The order lives in [`lib/bootstrap.js`](lib/bootstrap.js) and carries the
-design: `antigravity-continuation` sits above the request rewrites and
-`ipv6-first`, so its re-issued calls are rewritten and address-pinned exactly like
-the first one.
+The package wraps the two request-path global surfaces, once each:
 
-Features that touch the gateway's inbound requests wrap `Bun.serve`
-([`lib/inbound.js`](lib/inbound.js)). `plugin-bridge` and `vendor-shims` hook OMP's
-exports through [`registry-capture.js`](registry-capture.js), which must be
-preloaded before anything else.
+- **Inbound** ([`lib/inbound.mjs`](lib/inbound.mjs)) wraps `Bun.serve` and runs
+  ordered middleware. It also caches each request body, so several layers share
+  one read and one parse.
+- **Outbound** ([`lib/outbound.mjs`](lib/outbound.mjs)) wraps `globalThis.fetch`
+  and runs ordered handlers. A broken handler is reported and skipped; the call
+  continues inward.
 
-Only public, stable OMP surface is used: the `ModelRegistry` export and its
-documented methods, plus the plugin registration API. No minified identifiers are
-referenced, so an OMP upgrade does not require changes here. `omp plugin update`
-may rewrite `node_modules`; `vendor-shims` reinstalls the vendored packages on
-every start.
+Both pipelines expose an idempotent `dispose()`. It removes every registered
+handler and restores the original function, but only while the pipeline's own
+wrapper is still in place, so a later replacement is never overwritten. No other
+module replaces a global function.
+
+[`lib/runtime.mjs`](lib/runtime.mjs) installs enabled features in phase order,
+collects a disposer from each, and stops them in reverse order. A feature that
+fails to load is reported and skipped: one broken feature must not stop OMP.
+
+[`registry-capture.mjs`](registry-capture.mjs) runs before everything else. It
+captures the host exports (`ModelRegistry`, `streamSimple`,
+`registerOAuthProvider`) through lazy getters, then restores the native
+`Object.defineProperty`. Every timer calls `unref()`, so a short-lived CLI
+process is never kept alive.
+
+Credentials have one runtime path: [`lib/credentials.mjs`](lib/credentials.mjs)
+opens `agent.db`, reads it read-only for lookups, and writes only the rotated
+`kiro` row and its change revision. The CLI account importer
+([`lib/account-import.mjs`](lib/account-import.mjs)) is the only other writer of
+`auth_credentials`: `add-account` inserts or updates one account, and
+`repair-identities` rewrites identity keys. No other module opens the table.
+
+[`lib/sse.mjs`](lib/sse.mjs) is the only event-stream codec: one frame parser,
+one incremental scanner that accepts any chunk split, one bounded transform,
+and one response rebuilder.
+
+Only public OMP surface is used: the `ModelRegistry` export and its documented
+methods, plus the plugin registration API. No minified identifiers are
+referenced.
 
 ### Tool-call id collisions
 
-Some providers reject two tool calls whose ids share their first nine characters
-when those nine are alphanumeric. Clients mint ids like `call_0000000000000001`
-and `call_0000000000000002`, which collide, so the second call fails with a
-stream that dies part-way through.
+Some providers reject two tool calls whose ids share their first nine
+characters when those nine are alphanumeric. Clients mint ids like
+`call_0000000000000001` and `call_0000000000000002`, which collide, so the
+second call fails with a stream that dies part-way through.
 
-`tool-id-hash` prefixes every id in the inbound request with a hash8 derived from
-the id, and walks the response to put the client's own ids back, so the client is
-unaware anything happened. Two properties make the prefix safe:
+`tool-id-hash` prefixes every id in the inbound request with a hash8 derived
+from the id, and walks the response to put the client's own ids back, so the
+client is unaware anything happened. Two properties make the prefix safe:
 
 - eight base64 characters carry 48 bits, so two distinct ids essentially never
   share a prefix; and
 - the separator after the prefix is not alphanumeric, so even a stricter
   nine-character comparison never sees nine alphanumeric characters.
 
-The transform is deliberately not idempotent: an id that merely looks hashed may
-still be one a client minted. Every occurrence of the same id inside a request is
-transformed identically, so a tool call and the result answering it always stay
-paired. Set `OMP_SHIMS_TOOL_ID_SALT` to re-key ids.
+The transform is deliberately not idempotent: an id that merely looks hashed
+may still be one a client minted. Every occurrence of the same id inside a
+request is transformed identically, so a tool call and the result answering it
+always stay paired.
 
-## Diagnostics
+## Security
 
-All diagnostics go to stderr, never stdout: several omp subcommands parse stdout.
+- `~/.omp/shims.json` may hold `pluginBridge.tokens` and
+  `cline-pin-upstream.apiKey`. The loader writes it atomically with mode `0600`,
+  and `doctor` FAILs when group or other permissions are set.
+- The service units set `UMask=0077`. Files the services create under
+  `~/.omp` are owner-only.
+- Migration output (`shims.json`, `omp-shims-state.sqlite`) is written `0600`;
+  backups are `0600` inside a `0700` directory.
+- `add-account` and `repair-identities` back up `agent.db` first and never
+  print a token.
+- Diagnostics go to stderr, never stdout. The CLI prints environment variable
+  names, never values.
+- `traffic-log` records request metadata. Its default omits bodies. If you
+  enable `logBody`, the files contain prompts and tool output; protect the
+  directory as you protect the config.
+- No credentials, account addresses, or API keys are hardcoded in the package.
+  Configure them in `shims.json`, the credential store, or the environment.
+
+Report a vulnerability privately; see [SECURITY.md](SECURITY.md).
+
+## Diagnostics and logs
+
+All diagnostics go to stderr, never stdout.
 
 - `OMP_SHIMS_VERBOSE=1` logs what each feature does.
-- `OMP_SHIMS_DEBUG_REGISTRY=1` makes `plugin-bridge` print what the registry
-  resolved for each provider, the quickest way to explain a model that is
-  registered but not served:
+- `omp-shims doctor` checks the config, permissions, schema, state database,
+  and host exports.
+- `omp-shims status --json` gives scripts the same state plus ignored legacy
+  environment variables and unknown config keys.
 
-  ```
-  [omp-shims] registry-state {"provider":"kiro","hasProvider":true,"concreteAuth":true,"models":20}
-  ```
+Generated files:
 
-- `OMP_SHIMS_VENDOR_SKIP=1` skips installing the vendored packages when diagnosing
-  module resolution.
-- The Antigravity features write JSONL diagnostics under `~/.omp/logs/`.
+| Path | Contents |
+| --- | --- |
+| `~/.omp/omp-shims-state.sqlite` | One shared routing state database (`user_version = 2`). |
+| `~/.omp/logs/lazy-router.jsonl` | Router events. Rotates at 64 MiB, one generation kept. |
+| `~/.omp/logs/antigravity-continuation.jsonl` | Continuation diagnostics. |
+| `~/.omp/logs/antigravity-streams.jsonl` | Antigravity capture output. |
+| `~/.omp/logs/antigravity-accounts.jsonl` | Antigravity account routing log. |
+| `~/.omp/gateway-logs/` | Hourly traffic-log files (off by default). |
+
+The CLI removes these files with `uninstall --clean --yes`.
 
 ## Development
 
@@ -563,15 +671,16 @@ All diagnostics go to stderr, never stdout: several omp subcommands parse stdout
 git clone https://github.com/PamelaSprin47685ghall/omp-shims.git
 cd omp-shims
 bun install      # installs Biome, the only dev dependency
-bun run check    # lint + format check
+bun run ci       # Biome check + the test suite
+bun run check    # Biome lint + format check
 bun run format   # apply formatting
 bun test         # run the test suite
 ```
 
-The package is plain ES modules with no build step. Each feature is one file in
-[`features/`](features) exporting `install(config, context)`; shared plumbing is in
-[`lib/`](lib). See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add a feature and
-what a pull request needs, and [CHANGELOG.md](CHANGELOG.md) for release notes.
+The package has no build step. Each feature is one file in
+[`features/`](features) exporting `install(config, context)`; shared plumbing is
+in [`lib/`](lib). See [CONTRIBUTING.md](CONTRIBUTING.md) for the contract-first
+workflow and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## License
 
