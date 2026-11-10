@@ -35,13 +35,13 @@
             "children": [
               {
                 "type": "model",
-                "model": "google-antigravity/gemini-4-carbon-medium",
+                "model": "google-antigravity/gemini-4-argon",
                 "tier": "ultra",
                 "effort": "medium"
               },
               {
                 "type": "model",
-                "model": "google-antigravity/gemini-4-carbon-medium",
+                "model": "google-antigravity/gemini-4-argon",
                 "tier": "pro",
                 "effort": "medium"
               }

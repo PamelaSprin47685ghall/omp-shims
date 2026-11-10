@@ -19,8 +19,10 @@
 //
 // RISK: OMP paused this provider because Google has restricted accounts that
 // use Antigravity outside Google's own apps. Re-enabling it can get an account
-// banned. This file exists only as an explicit opt-in; it is not preloaded by
-// the shims service units or by the plugin entry.
+// banned. `index.mjs` imports this file, so the plugin entry always unpauses;
+// the service units add it to BUN_OPTIONS only when
+// OMP_SHIMS_ANTIGRAVITY_UNPAUSE is true. `omp-shims antigravity-login` and
+// `omp-shims antigravity-env` set the same preload for terminal commands.
 
 import { readdirSync } from "node:fs";
 
@@ -78,10 +80,7 @@ async function loadBundledCore() {
 /** Load the source-tree packages when this preload runs outside a compiled omp. */
 async function loadSourceCore() {
   try {
-    const [oauth, catalog] = await Promise.all([
-      import("@oh-my-pi/pi-ai"),
-      import("@oh-my-pi/pi-catalog/compat/auth"),
-    ]);
+    const [oauth, catalog] = await Promise.all([import("@oh-my-pi/pi-ai"), import("@oh-my-pi/pi-catalog/compat/auth")]);
     if (typeof oauth.registerOAuthProvider !== "function" || typeof oauth.getProviderDefinition !== "function") {
       return undefined;
     }
