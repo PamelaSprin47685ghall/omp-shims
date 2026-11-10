@@ -1,0 +1,1107 @@
+{
+  "schemaVersion": 3,
+  "snapshotId": "snap_0123456789abcdef",
+  "generatedAt": "2026-11-10T12:00:00.000Z",
+  "answeredBy": "fixture-a:101",
+  "buildVersion": "sha256-0123456789ab",
+  "epoch": {
+    "id": "epoch_1762776000000_fixture",
+    "since": "2026-11-10T00:00:00.000Z"
+  },
+  "store": {
+    "mode": "sqlite",
+    "available": true,
+    "reason": null
+  },
+  "period": {
+    "id": "peak",
+    "label": "高峰时段",
+    "nextSwitch": {
+      "at": "2026-11-10T14:10:00.000Z",
+      "period": "offPeak",
+      "label": "闲时 · 2 小时 10 分后"
+    }
+  },
+  "catalog": {
+    "ready": true,
+    "workerReady": true,
+    "aggregateReady": true
+  },
+  "overview": {
+    "primary": [
+      {
+        "key": "period",
+        "metricIds": ["M01", "M02"]
+      },
+      {
+        "key": "inFlight",
+        "metricIds": ["M03"],
+        "detailMetricIds": ["M04"]
+      },
+      {
+        "key": "channels",
+        "metricIds": ["M05"]
+      },
+      {
+        "key": "tokens",
+        "metricIds": ["M08", "M09", "M10", "M11", "M12"]
+      }
+    ],
+    "secondary": [
+      {
+        "key": "routeSummary",
+        "metricIds": ["M06", "M07"]
+      },
+      {
+        "key": "routeDiagnostics",
+        "metricIds": ["M13", "M14", "M15", "M16", "M17", "M18", "M19"]
+      },
+      {
+        "key": "capacity",
+        "metricIds": ["M21"]
+      },
+      {
+        "key": "health",
+        "metricIds": ["M20", "M22", "M23"]
+      },
+      {
+        "key": "catalog",
+        "metricIds": ["M24"]
+      },
+      {
+        "key": "store",
+        "metricIds": ["M26"]
+      },
+      {
+        "key": "meta",
+        "metricIds": ["M27"]
+      }
+    ]
+  },
+  "metrics": {
+    "M01": {
+      "id": "M01",
+      "label": "当前时段",
+      "value": "高峰时段",
+      "exact": "高峰时段",
+      "unit": "text",
+      "scope": "global",
+      "window": "now",
+      "available": true,
+      "reason": null,
+      "detail": "工作日高峰 · 下次切换 2 小时 10 分后",
+      "tone": "normal",
+      "coverage": null
+    },
+    "M02": {
+      "id": "M02",
+      "label": "下次切换",
+      "value": "2 小时 10 分后",
+      "exact": "2026-11-10T14:10:00.000Z",
+      "unit": "text",
+      "scope": "global",
+      "window": "now",
+      "available": true,
+      "reason": null,
+      "detail": "闲时 · 2 小时 10 分后",
+      "tone": "normal",
+      "coverage": null
+    },
+    "M03": {
+      "id": "M03",
+      "label": "全局在途上游请求",
+      "value": "7",
+      "exact": "7 个在途请求",
+      "unit": "count",
+      "scope": "global_approx",
+      "window": "now",
+      "available": true,
+      "reason": null,
+      "detail": "全局近似 · 2 workers · 最旧 1s",
+      "tone": "normal",
+      "coverage": {
+        "observed": 2,
+        "complete": 2
+      }
+    },
+    "M04": {
+      "id": "M04",
+      "label": "在途（按 worker）",
+      "value": "4",
+      "exact": "4 个在途请求",
+      "unit": "count",
+      "scope": "per_worker",
+      "window": "now",
+      "available": true,
+      "reason": null,
+      "detail": "本 worker · 心跳 1s",
+      "tone": "normal",
+      "coverage": {
+        "observed": 1,
+        "complete": 1
+      }
+    },
+    "M05": {
+      "id": "M05",
+      "label": "可用/冷却/繁忙账号通道",
+      "value": "可用 5 · 冷却 1 · 繁忙 0 · 通道 6",
+      "exact": "可用 5 · 冷却 1 · 繁忙 0 · 通道 6",
+      "unit": "count",
+      "scope": "global",
+      "window": "current",
+      "available": true,
+      "reason": null,
+      "detail": "",
+      "tone": "normal",
+      "coverage": null
+    },
+    "M06": {
+      "id": "M06",
+      "label": "Lazy 路由/实际模型",
+      "value": "2 条路由 · 4 个模型",
+      "exact": "2 条路由 · 4 个模型",
+      "unit": "count",
+      "scope": "global",
+      "window": "current",
+      "available": true,
+      "reason": null,
+      "detail": "",
+      "tone": "normal",
+      "coverage": null
+    },
+    "M07": {
+      "id": "M07",
+      "label": "路由前缀亲和命中率",
+      "value": "62.5%",
+      "exact": "10 / 16",
+      "unit": "percent",
+      "scope": "global",
+      "window": "5m",
+      "available": true,
+      "reason": null,
+      "detail": "近 5 分钟 · 命中 10 / 查询 16",
+      "tone": "normal",
+      "coverage": {
+        "observed": 16,
+        "complete": 16
+      }
+    },
+    "M08": {
+      "id": "M08",
+      "label": "累计未缓存输入",
+      "value": "1.2 M",
+      "exact": "1,234,567",
+      "unit": "tokens",
+      "scope": "global",
+      "window": "epoch",
+      "available": true,
+      "reason": null,
+      "detail": "自 2026-11-10 00:00 UTC 起 · 已上报 8 / 10 请求 · 含直连/非流式",
+      "tone": "normal",
+      "coverage": {
+        "observed": 8,
+        "complete": 10
+      }
+    },
+    "M09": {
+      "id": "M09",
+      "label": "累计缓存输入",
+      "value": "340.0 K",
+      "exact": "340,000",
+      "unit": "tokens",
+      "scope": "global",
+      "window": "epoch",
+      "available": true,
+      "reason": null,
+      "detail": "自 2026-11-10 00:00 UTC 起 · 已上报 7 / 10 请求 · 含直连/非流式",
+      "tone": "normal",
+      "coverage": {
+        "observed": 7,
+        "complete": 10
+      }
+    },
+    "M10": {
+      "id": "M10",
+      "label": "累计输出",
+      "value": "98.7 K",
+      "exact": "98,700",
+      "unit": "tokens",
+      "scope": "global",
+      "window": "epoch",
+      "available": true,
+      "reason": null,
+      "detail": "自 2026-11-10 00:00 UTC 起 · 已上报 10 / 10 请求 · 含直连/非流式",
+      "tone": "normal",
+      "coverage": {
+        "observed": 10,
+        "complete": 10
+      }
+    },
+    "M11": {
+      "id": "M11",
+      "label": "Token 上报覆盖率",
+      "value": "80.0%",
+      "exact": "8 / 10",
+      "unit": "percent",
+      "scope": "global",
+      "window": "epoch",
+      "available": true,
+      "reason": null,
+      "detail": "分母为已完成且有 usage 的请求 · 含直连/非流式",
+      "tone": "normal",
+      "coverage": null
+    },
+    "M12": {
+      "id": "M12",
+      "label": "累计官方 API 价格等效价值",
+      "value": "USD $12.3456",
+      "exact": "12.3456 USD",
+      "unit": "usd",
+      "scope": "global",
+      "window": "epoch",
+      "available": true,
+      "reason": null,
+      "detail": "CNY ¥82.25 · 按官方标价估算 · 非账单 · 2/3 模型已定价 · 基准日 2026-10-29",
+      "tone": "normal",
+      "coverage": null
+    },
+    "M24": {
+      "id": "M24",
+      "label": "目录就绪",
+      "value": "就绪",
+      "exact": "目录已就绪",
+      "unit": "text",
+      "scope": "global",
+      "window": "current",
+      "available": true,
+      "reason": null,
+      "detail": "",
+      "tone": "normal",
+      "coverage": null
+    },
+    "M25": {
+      "id": "M25",
+      "label": "另一时段预览",
+      "value": "—",
+      "exact": "未保留该时段预览",
+      "unit": "text",
+      "scope": "n/a",
+      "window": "n/a",
+      "available": false,
+      "reason": "未保留该时段预览",
+      "detail": "",
+      "tone": "muted",
+      "coverage": null
+    },
+    "M26": {
+      "id": "M26",
+      "label": "共享状态",
+      "value": "共享 SQLite",
+      "exact": "sqlite · available",
+      "unit": "text",
+      "scope": "global",
+      "window": "current",
+      "available": true,
+      "reason": null,
+      "detail": "",
+      "tone": "normal",
+      "coverage": null
+    },
+    "M27": {
+      "id": "M27",
+      "label": "上次更新/快照",
+      "value": "刚刚",
+      "exact": "2026-11-10T12:00:00.000Z",
+      "unit": "text",
+      "scope": "n/a",
+      "window": "now",
+      "available": true,
+      "reason": null,
+      "detail": "snap_0123456789abcdef · sha256-0123456789ab",
+      "tone": "normal",
+      "coverage": null
+    }
+  },
+  "routes": [
+    {
+      "id": "lazy/pro",
+      "title": "专业路由",
+      "state": "alive",
+      "available": 3,
+      "totalUnits": 5,
+      "strategy": "按总耗时评分 · 带温度探索",
+      "graph": {
+        "type": "op",
+        "label": "并行候选",
+        "children": [
+          {
+            "type": "model",
+            "model": "anthropic/model-a",
+            "label": "anthropic/model-a",
+            "children": []
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "lazy/pro|anthropic/model-a",
+          "model": "anthropic/model-a",
+          "effort": "high",
+          "available": 2,
+          "totalUnits": 3,
+          "perf": {
+            "M13": {
+              "id": "M13",
+              "label": "预测总耗时",
+              "value": "1.8 s",
+              "exact": "1820 ms",
+              "unit": "ms",
+              "scope": "per_model",
+              "window": "current",
+              "available": true,
+              "reason": null,
+              "detail": "全局后验预测",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M14": {
+              "id": "M14",
+              "label": "RD",
+              "value": "0.42",
+              "exact": "0.42",
+              "unit": "text",
+              "scope": "per_model",
+              "window": "current",
+              "available": true,
+              "reason": null,
+              "detail": "RD · 不确定性，不是排名",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M15": {
+              "id": "M15",
+              "label": "证据权重",
+              "value": "3.7",
+              "exact": "3.7",
+              "unit": "text",
+              "scope": "per_model",
+              "window": "current",
+              "available": true,
+              "reason": null,
+              "detail": "证据权重",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M16": {
+              "id": "M16",
+              "label": "右删失",
+              "value": "2",
+              "exact": "2",
+              "unit": "count",
+              "scope": "per_model",
+              "window": "current",
+              "available": true,
+              "reason": null,
+              "detail": "右删失 · 与完整样本分开",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M17": {
+              "id": "M17",
+              "label": "无错并发实证",
+              "value": "6",
+              "exact": "6",
+              "unit": "count",
+              "scope": "per_model",
+              "window": "30m",
+              "available": true,
+              "reason": null,
+              "detail": "全局实证下界 · 有效至 2026-11-10T12:30:00.000Z",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M18": {
+              "id": "M18",
+              "label": "最近完整耗时",
+              "value": "1.6 s",
+              "exact": "1640 ms",
+              "unit": "ms",
+              "scope": "per_model",
+              "window": "30m",
+              "available": true,
+              "reason": null,
+              "detail": "近 30 分钟 · 完整样本平均 · 3 个完整样本",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M19": {
+              "id": "M19",
+              "label": "30 分钟完整/删失样本",
+              "value": "3 / 2",
+              "exact": "完整 3 · 删失 2",
+              "unit": "count",
+              "scope": "per_model",
+              "window": "30m",
+              "available": true,
+              "reason": null,
+              "detail": "完整与删失分开计数",
+              "tone": "normal",
+              "coverage": null
+            }
+          },
+          "units": [
+            {
+              "unitRef": "u_a1a1a1a1a1a1a1a1",
+              "displayName": "anthropic:plus#1",
+              "provider": "anthropic",
+              "model": "anthropic/model-1",
+              "health": "alive",
+              "healthLabel": "可用",
+              "metrics": {
+                "M20": {
+                  "id": "M20",
+                  "label": "账号健康",
+                  "value": "可用",
+                  "exact": "alive",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": true,
+                  "reason": null,
+                  "detail": "",
+                  "tone": "positive",
+                  "coverage": null
+                },
+                "M21": {
+                  "id": "M21",
+                  "label": "账号并发",
+                  "value": "2/4",
+                  "exact": "2 / 4",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": true,
+                  "reason": null,
+                  "detail": "全局 held/max",
+                  "tone": "normal",
+                  "coverage": null
+                },
+                "M22": {
+                  "id": "M22",
+                  "label": "下次探测",
+                  "value": "—",
+                  "exact": "2026-11-10T12:03:00.000Z",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": false,
+                  "reason": "无需探测",
+                  "detail": "",
+                  "tone": "normal",
+                  "coverage": null
+                },
+                "M23": {
+                  "id": "M23",
+                  "label": "冷却原因",
+                  "value": "—",
+                  "exact": "无",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": false,
+                  "reason": null,
+                  "detail": "",
+                  "tone": "muted",
+                  "coverage": null
+                }
+              },
+              "capacity": {
+                "held": 2,
+                "max": 4,
+                "scope": "unit",
+                "stale": false,
+                "updatedAt": "2026-11-10T11:59:59.000Z"
+              },
+              "reason": null,
+              "nextProbeAt": null,
+              "coolingSince": null,
+              "stale": false
+            },
+            {
+              "unitRef": "u_a2a2a2a2a2a2a2a2",
+              "displayName": "anthropic:plus#2",
+              "provider": "anthropic",
+              "model": "anthropic/model-2",
+              "health": "cooling",
+              "healthLabel": "冷却",
+              "metrics": {
+                "M20": {
+                  "id": "M20",
+                  "label": "账号健康",
+                  "value": "冷却",
+                  "exact": "cooling",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": true,
+                  "reason": null,
+                  "detail": "",
+                  "tone": "warning",
+                  "coverage": null
+                },
+                "M21": {
+                  "id": "M21",
+                  "label": "账号并发",
+                  "value": "2/4",
+                  "exact": "2 / 4",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": true,
+                  "reason": null,
+                  "detail": "全局 held/max",
+                  "tone": "normal",
+                  "coverage": null
+                },
+                "M22": {
+                  "id": "M22",
+                  "label": "下次探测",
+                  "value": "3 分钟后",
+                  "exact": "2026-11-10T12:03:00.000Z",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": true,
+                  "reason": null,
+                  "detail": "",
+                  "tone": "normal",
+                  "coverage": null
+                },
+                "M23": {
+                  "id": "M23",
+                  "label": "冷却原因",
+                  "value": "429 限流",
+                  "exact": "429",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": true,
+                  "reason": null,
+                  "detail": "",
+                  "tone": "warning",
+                  "coverage": null
+                }
+              },
+              "capacity": {
+                "held": 2,
+                "max": 4,
+                "scope": "unit",
+                "stale": false,
+                "updatedAt": "2026-11-10T11:59:59.000Z"
+              },
+              "reason": "429 限流",
+              "nextProbeAt": "2026-11-10T12:03:00.000Z",
+              "coolingSince": "2026-11-10T11:57:00.000Z",
+              "stale": false
+            }
+          ]
+        },
+        {
+          "id": "lazy/pro|openai/model-b",
+          "model": "openai/model-b",
+          "effort": "—",
+          "available": 1,
+          "totalUnits": 2,
+          "perf": {
+            "M13": {
+              "id": "M13",
+              "label": "预测总耗时",
+              "value": "1.8 s",
+              "exact": "1820 ms",
+              "unit": "ms",
+              "scope": "per_model",
+              "window": "current",
+              "available": true,
+              "reason": null,
+              "detail": "全局后验预测",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M14": {
+              "id": "M14",
+              "label": "RD",
+              "value": "0.42",
+              "exact": "0.42",
+              "unit": "text",
+              "scope": "per_model",
+              "window": "current",
+              "available": true,
+              "reason": null,
+              "detail": "RD · 不确定性，不是排名",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M15": {
+              "id": "M15",
+              "label": "证据权重",
+              "value": "3.7",
+              "exact": "3.7",
+              "unit": "text",
+              "scope": "per_model",
+              "window": "current",
+              "available": true,
+              "reason": null,
+              "detail": "证据权重",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M16": {
+              "id": "M16",
+              "label": "右删失",
+              "value": "2",
+              "exact": "2",
+              "unit": "count",
+              "scope": "per_model",
+              "window": "current",
+              "available": true,
+              "reason": null,
+              "detail": "右删失 · 与完整样本分开",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M17": {
+              "id": "M17",
+              "label": "无错并发实证",
+              "value": "6",
+              "exact": "6",
+              "unit": "count",
+              "scope": "per_model",
+              "window": "30m",
+              "available": true,
+              "reason": null,
+              "detail": "全局实证下界 · 有效至 2026-11-10T12:30:00.000Z",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M18": {
+              "id": "M18",
+              "label": "最近完整耗时",
+              "value": "1.6 s",
+              "exact": "1640 ms",
+              "unit": "ms",
+              "scope": "per_model",
+              "window": "30m",
+              "available": true,
+              "reason": null,
+              "detail": "近 30 分钟 · 完整样本平均 · 3 个完整样本",
+              "tone": "normal",
+              "coverage": null
+            },
+            "M19": {
+              "id": "M19",
+              "label": "30 分钟完整/删失样本",
+              "value": "3 / 2",
+              "exact": "完整 3 · 删失 2",
+              "unit": "count",
+              "scope": "per_model",
+              "window": "30m",
+              "available": true,
+              "reason": null,
+              "detail": "完整与删失分开计数",
+              "tone": "normal",
+              "coverage": null
+            }
+          },
+          "units": [
+            {
+              "unitRef": "u_b1b1b1b1b1b1b1b1",
+              "displayName": "openai:plus#1",
+              "provider": "openai",
+              "model": "openai/model-1",
+              "health": "alive",
+              "healthLabel": "可用",
+              "metrics": {
+                "M20": {
+                  "id": "M20",
+                  "label": "账号健康",
+                  "value": "可用",
+                  "exact": "alive",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": true,
+                  "reason": null,
+                  "detail": "",
+                  "tone": "positive",
+                  "coverage": null
+                },
+                "M21": {
+                  "id": "M21",
+                  "label": "账号并发",
+                  "value": "2/4",
+                  "exact": "2 / 4",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": true,
+                  "reason": null,
+                  "detail": "全局 held/max",
+                  "tone": "normal",
+                  "coverage": null
+                },
+                "M22": {
+                  "id": "M22",
+                  "label": "下次探测",
+                  "value": "—",
+                  "exact": "2026-11-10T12:03:00.000Z",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": false,
+                  "reason": "无需探测",
+                  "detail": "",
+                  "tone": "normal",
+                  "coverage": null
+                },
+                "M23": {
+                  "id": "M23",
+                  "label": "冷却原因",
+                  "value": "—",
+                  "exact": "无",
+                  "unit": "text",
+                  "scope": "per_unit",
+                  "window": "current",
+                  "available": false,
+                  "reason": null,
+                  "detail": "",
+                  "tone": "muted",
+                  "coverage": null
+                }
+              },
+              "capacity": {
+                "held": 2,
+                "max": 4,
+                "scope": "unit",
+                "stale": false,
+                "updatedAt": "2026-11-10T11:59:59.000Z"
+              },
+              "reason": null,
+              "nextProbeAt": null,
+              "coolingSince": null,
+              "stale": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "lazy/flash",
+      "title": "快速路由",
+      "state": "loading",
+      "available": 0,
+      "totalUnits": 0,
+      "strategy": "按总耗时评分 · 带温度探索",
+      "graph": null,
+      "channels": []
+    }
+  ],
+  "diagnostics": {
+    "windowMinutes": 30,
+    "available": true,
+    "reason": null,
+    "rows": [
+      {
+        "model": "anthropic/model-a",
+        "completeSamples": 3,
+        "imputedSamples": 2,
+        "legacyMixedSamples": 0,
+        "meanTotalMs": 1640,
+        "meanTotalText": "1.6 s",
+        "exact": "1640 ms",
+        "ttftSamples": 4,
+        "speedSamples": 3,
+        "tokensPerSecond": 72.4
+      },
+      {
+        "model": "openai/model-b",
+        "completeSamples": 0,
+        "imputedSamples": 1,
+        "legacyMixedSamples": 0,
+        "meanTotalMs": null,
+        "meanTotalText": "—",
+        "exact": "无数据",
+        "ttftSamples": 0,
+        "speedSamples": 0,
+        "tokensPerSecond": null
+      }
+    ]
+  },
+  "workers": [
+    {
+      "worker": "fixture-a:101",
+      "answeredBy": "fixture-a:101",
+      "buildVersion": "sha256-0123456789ab",
+      "viewSchema": 3,
+      "inFlight": 4,
+      "catalogReady": true,
+      "heartbeatAt": "2026-11-10T11:59:59.000Z",
+      "ageMs": 1000,
+      "stale": false,
+      "scope": "global",
+      "metric": {
+        "id": "M04",
+        "label": "在途（按 worker）",
+        "value": "4",
+        "exact": "4 个在途请求",
+        "unit": "count",
+        "scope": "per_worker",
+        "window": "now",
+        "available": true,
+        "reason": null,
+        "detail": "全局 · 心跳 1s",
+        "tone": "normal",
+        "coverage": {
+          "observed": 1,
+          "complete": 1
+        }
+      }
+    },
+    {
+      "worker": "fixture-b:202",
+      "answeredBy": "fixture-b:202",
+      "buildVersion": "sha256-0123456789ab",
+      "viewSchema": 3,
+      "inFlight": 3,
+      "catalogReady": true,
+      "heartbeatAt": "2026-11-10T11:59:59.000Z",
+      "ageMs": 900,
+      "stale": false,
+      "scope": "global",
+      "metric": {
+        "id": "M04",
+        "label": "在途（按 worker）",
+        "value": "3",
+        "exact": "3 个在途请求",
+        "unit": "count",
+        "scope": "per_worker",
+        "window": "now",
+        "available": true,
+        "reason": null,
+        "detail": "全局 · 心跳 1s",
+        "tone": "normal",
+        "coverage": {
+          "observed": 1,
+          "complete": 1
+        }
+      }
+    },
+    {
+      "worker": "fixture-c:303",
+      "answeredBy": "fixture-c:303",
+      "buildVersion": "sha256-0123456789ab",
+      "viewSchema": 3,
+      "inFlight": 2,
+      "catalogReady": true,
+      "heartbeatAt": "2026-11-10T11:59:59.000Z",
+      "ageMs": 8000,
+      "stale": true,
+      "scope": "worker",
+      "metric": {
+        "id": "M04",
+        "label": "在途（按 worker）",
+        "value": "2",
+        "exact": "2 个在途请求",
+        "unit": "count",
+        "scope": "per_worker",
+        "window": "now",
+        "available": true,
+        "reason": null,
+        "detail": "本 worker · 心跳 8s",
+        "tone": "normal",
+        "coverage": {
+          "observed": 1,
+          "complete": 1
+        }
+      }
+    }
+  ],
+  "capacity": {
+    "available": true,
+    "reason": null,
+    "rows": [
+      {
+        "unitRef": "u_a1a1a1a1a1a1a1a1",
+        "displayName": "anthropic:plus#1",
+        "provider": "anthropic",
+        "model": "anthropic/model-a",
+        "scope": "unit",
+        "held": 2,
+        "max": 4,
+        "worker": "fixture-a:101",
+        "updatedAt": "2026-11-10T11:59:59.000Z",
+        "ageMs": 1000,
+        "stale": false
+      },
+      {
+        "unitRef": "u_b1b1b1b1b1b1b1b1",
+        "displayName": "openai:plus#1",
+        "provider": "openai",
+        "model": "openai/model-b",
+        "scope": "unit_model",
+        "held": 1,
+        "max": 0,
+        "worker": "fixture-b:202",
+        "updatedAt": "2026-11-10T11:59:58.000Z",
+        "ageMs": 2000,
+        "stale": false
+      }
+    ],
+    "liveCount": 2,
+    "staleCount": 0
+  },
+  "health": {
+    "available": true,
+    "reason": null,
+    "rows": [
+      {
+        "unitRef": "u_a1a1a1a1a1a1a1a1",
+        "displayName": "anthropic:plus#1",
+        "provider": "anthropic",
+        "model": "anthropic/model-a",
+        "state": "alive",
+        "health": "alive",
+        "reason": null,
+        "until": null,
+        "probeLeaseUntil": null,
+        "nextProbeAt": null,
+        "updatedAt": "2026-11-10T11:59:59.000Z",
+        "ageMs": 1000
+      },
+      {
+        "unitRef": "u_a2a2a2a2a2a2a2a2",
+        "displayName": "anthropic:plus#2",
+        "provider": "anthropic",
+        "model": "anthropic/model-a",
+        "state": "dead",
+        "health": "cooling",
+        "reason": "429 限流",
+        "until": "2026-11-10T12:03:00.000Z",
+        "probeLeaseUntil": "2026-11-10T12:00:30.000Z",
+        "nextProbeAt": "2026-11-10T12:03:00.000Z",
+        "updatedAt": "2026-11-10T11:57:00.000Z",
+        "ageMs": 180000
+      }
+    ]
+  },
+  "proof": {
+    "available": true,
+    "ttlMinutes": 30,
+    "byModel": {
+      "anthropic/model-a": {
+        "verified": 6,
+        "until": "2026-11-10T12:30:00.000Z"
+      },
+      "openai/model-b": {
+        "verified": 4,
+        "until": "2026-11-10T12:20:00.000Z"
+      }
+    }
+  },
+  "affinity": {
+    "available": true,
+    "windowMinutes": 5,
+    "hits": 10,
+    "lookups": 16,
+    "hitRate": 0.625
+  },
+  "tokenTotals": {
+    "available": true,
+    "mode": "sqlite",
+    "scope": {
+      "includesNonSse": true,
+      "includesDirect": true,
+      "label": "含直连/非流式"
+    },
+    "epoch": {
+      "id": "epoch_1762776000000_fixture",
+      "since": "2026-11-10T00:00:00.000Z"
+    },
+    "totals": {
+      "uncachedInput": 1234567,
+      "cachedInput": 340000,
+      "output": 98700
+    },
+    "coverage": {
+      "complete": 10,
+      "uncachedInput": 8,
+      "cachedInput": 7,
+      "output": 10
+    },
+    "officialValue": {
+      "currency": "USD",
+      "valueUsd": 12.3456,
+      "pricedModels": 2,
+      "totalModels": 3,
+      "unpricedModels": 1,
+      "models": [
+        {
+          "model": "anthropic/model-a",
+          "priced": true,
+          "valueUsd": 9.8765,
+          "source": "https://example.com/pricing/anthropic",
+          "basis": "official list price",
+          "perMillion": {
+            "uncachedInput": 3,
+            "cachedInput": 0.3,
+            "output": 15
+          }
+        },
+        {
+          "model": "openai/model-b",
+          "priced": true,
+          "valueUsd": 2.4691,
+          "source": "https://example.com/pricing/openai",
+          "basis": "official list price",
+          "perMillion": {
+            "uncachedInput": 2.5,
+            "cachedInput": 1.25,
+            "output": 10
+          }
+        },
+        {
+          "model": "local/unpriced",
+          "priced": false,
+          "valueUsd": 0,
+          "source": null,
+          "basis": "unpriced",
+          "perMillion": {
+            "uncachedInput": 0,
+            "cachedInput": 0,
+            "output": 0
+          }
+        }
+      ],
+      "ratesAsOf": "2026-10-29",
+      "note": "按官方标价估算 · 非账单"
+    },
+    "models": [
+      {
+        "provider": "anthropic",
+        "model": "model-a",
+        "uncachedInput": 1000000,
+        "cachedInput": 300000,
+        "output": 80000,
+        "complete": 6
+      },
+      {
+        "provider": "openai",
+        "model": "model-b",
+        "uncachedInput": 234567,
+        "cachedInput": 40000,
+        "output": 18700,
+        "complete": 4
+      }
+    ]
+  },
+  "notices": []
+}
