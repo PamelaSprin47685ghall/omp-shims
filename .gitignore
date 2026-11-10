@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Status-page deterministic build scratch space
+.tmp/
+
 # Logs and diagnostics
 *.log
 *.jsonl

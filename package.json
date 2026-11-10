@@ -29,15 +29,19 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check .",
+    "build:status-page": "bun scripts/build-status-page.mjs",
+    "build:status-page:check": "bun scripts/build-status-page.mjs --check",
     "test": "bun test",
     "ci": "biome ci . && bun test",
     "prepublishOnly": "bun run ci"
   },
   "files": [
     "index.mjs",
+    "antigravity-unpause.mjs",
     "preload.mjs",
     "registry-capture.mjs",
     "lib/",
+    "lib/router/status-page/dist/",
     "features/",
     "presets/",
     "vendor/",
@@ -77,6 +81,11 @@
     "commandcode"
   ],
   "devDependencies": {
-    "@biomejs/biome": "2.5.15"
+    "@biomejs/biome": "2.5.15",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "framework7": "9.3.0",
+    "framework7-svelte": "9.3.0",
+    "svelte": "5.57.3",
+    "vite": "8.3.7"
   }
 }

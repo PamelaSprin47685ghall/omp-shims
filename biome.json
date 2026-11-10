@@ -6,8 +6,21 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!bun.lock"]
+    "includes": ["**", "!bun.lock", "!lib/router/status-page/dist", "!docs/manual-acceptance/**/evidence", "!.s4-tmp-*"]
   },
+  "overrides": [
+    {
+      "includes": ["lib/router/status-page/app/**/*.svelte"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedImports": "off",
+            "noUnusedVariables": "off"
+          }
+        }
+      }
+    }
+  ],
   "formatter": {
     "enabled": true,
     "indentStyle": "space",

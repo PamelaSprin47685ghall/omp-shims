@@ -42,3 +42,16 @@ jobs:
           bun-version: ${{ matrix.bun }}
       - run: bun install --frozen-lockfile
       - run: bun test
+
+  status-page:
+    name: Status page build freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - run: bun run build:status-page:check
+      - run: git diff --exit-code -- lib/router/status-page/dist

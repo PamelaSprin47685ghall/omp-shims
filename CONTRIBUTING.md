@@ -24,6 +24,8 @@ bun run ci       # Biome check + bun test
 bun run check    # Biome lint and format check
 bun run format   # apply formatting
 bun test         # test suite
+bun run build:status-page        # rebuild the committed status-page assets
+bun run build:status-page:check  # fail if the committed output is stale
 ```
 
 The tests never touch your real `~/.omp`: the test setup points the config at a
@@ -76,8 +78,12 @@ settings in `~/.omp/shims.json`.
   credential store.
 - **Keep features independent.** A feature must work, or cleanly do nothing,
   whatever else is enabled.
-- **Pure ES modules.** New source files use the `.mjs` extension. Do not add a
-  build step or a second module format.
+- **Pure ES modules at runtime.** New runtime source files use `.mjs`. One
+  exception is the status page UI: `lib/router/status-page/app/**` is Svelte
+  source compiled by Vite, and its output is committed under
+  `lib/router/status-page/dist/`. The gateway never builds at startup or on a
+  request. Run `bun run build:status-page` after changing the page source; CI
+  fails on source/output drift.
 
 ## Configuration and migration
 
