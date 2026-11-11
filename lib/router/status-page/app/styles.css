@@ -367,51 +367,154 @@ button.button {
   margin-block-end: var(--status-section-gap);
 }
 
-.status-overview {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--status-space-4);
-  align-items: stretch;
-}
-
-@media (max-width: 1199px) {
-  .status-overview {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 767px) {
-  .status-overview {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--status-space-3);
-  }
-}
-
-.status-primary-card.card {
+.status-primary-dashboard.card {
   margin: 0;
-  height: 100%;
   border-radius: var(--status-radius);
   background: var(--status-surface);
   box-shadow: var(--status-shadow);
+  overflow: hidden;
 }
 
-.status-primary-card > .card-content {
-  box-sizing: border-box;
-  height: 100%;
-  padding: var(--status-card-padding);
+.status-primary-dashboard > .card-content {
+  padding: 0;
 }
 
-/* On the four-up desktop row, let each card end with its content instead of
-   padding a short card down to the tall token ledger. */
+.status-dashboard-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--status-space-2) var(--status-space-4);
+  padding: var(--status-space-3) var(--status-space-4);
+  border-block-end: 1px solid var(--status-border);
+}
+
+.status-dashboard-title {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.status-dashboard-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--status-space-1) var(--status-space-3);
+  margin: 0;
+  color: var(--status-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-dashboard-meta span {
+  white-space: nowrap;
+}
+
+/* One surface, four cells. The 1px gap carries the separator colour so the
+   cells do not need their own borders or shadows. */
+.status-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 1px;
+  background: var(--status-border);
+}
+
+@media (min-width: 600px) and (max-width: 1199px) {
+  .status-dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: 1fr;
+  }
+}
+
 @media (min-width: 1200px) {
-  .status-overview {
-    align-items: start;
+  .status-dashboard-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-rows: auto;
   }
+}
 
-  .status-primary-card.card,
-  .status-primary-card > .card-content {
-    height: auto;
-  }
+.status-dashboard-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--status-card-padding);
+  background: var(--status-surface);
+}
+
+.status-dashboard-cell-title {
+  margin: 0;
+  color: var(--status-text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.status-dashboard-cell > .status-dashboard-cell-title {
+  margin-block-end: var(--status-space-3);
+}
+
+.status-dashboard-cell-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.status-dashboard-cell-foot {
+  margin-block-start: auto;
+  padding-block-start: var(--status-space-3);
+}
+
+.status-channel-breakdown {
+  min-width: 0;
+}
+
+.status-channel-caption {
+  margin: 0 0 var(--status-space-1);
+  color: var(--status-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--status-space-4) var(--status-space-2);
+}
+
+.status-channel-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding-block: var(--status-space-1);
+}
+
+.status-channel-label {
+  color: var(--status-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-channel-value {
+  color: var(--status-text);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-channel-stat.tone-positive .status-channel-value {
+  color: var(--status-positive);
+}
+
+.status-channel-stat.tone-warning .status-channel-value {
+  color: var(--status-warning);
+}
+
+.status-channel-stat.tone-muted .status-channel-value {
+  color: var(--status-muted);
 }
 
 .status-metric {
@@ -954,19 +1057,20 @@ html[data-js="off"] .accordion-item-toggle {
   margin-block-start: var(--status-space-4);
 }
 
+.status-token-cell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .status-token-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--status-space-2);
-}
-
-.status-card-title {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.4;
-  color: var(--status-text);
+  margin-block-end: var(--status-space-3);
 }
 
 .status-scope {
@@ -982,8 +1086,10 @@ html[data-js="off"] .accordion-item-toggle {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--status-space-1) var(--status-space-3);
-  padding-block: var(--status-space-2);
+  padding-block: 2px;
   border-block-start: 1px solid var(--status-border);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .status-token-row:first-child {
@@ -1006,26 +1112,45 @@ html[data-js="off"] .accordion-item-toggle {
   color: var(--status-muted);
 }
 
-.status-token-row dd.status-token-detail {
-  grid-column: 1 / -1;
-  color: var(--status-muted);
-  font-size: 12px;
-  font-weight: 400;
-  text-align: start;
-}
-
-.status-epoch {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--status-space-2);
-  margin-block-start: var(--status-space-3);
-  color: var(--status-muted);
-  font-size: 12px;
-}
-
 .status-epoch-id {
   overflow-wrap: anywhere;
+}
+
+.status-dashboard-details {
+  margin-block-start: auto;
+  padding-block-start: var(--status-space-3);
+}
+
+.status-dashboard-detail-body {
+  padding-block-end: var(--status-space-2);
+}
+
+.status-dashboard-detail-body p {
+  margin: var(--status-space-2) 0 0;
+}
+
+.status-detail-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--status-space-1) var(--status-space-3);
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-detail-list dt {
+  color: var(--status-muted);
+}
+
+.status-detail-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-detail-list + .status-detail-list {
+  margin-block-start: var(--status-space-2);
+  padding-block-start: var(--status-space-2);
+  border-block-start: 1px solid var(--status-border);
 }
 
 .status-disclosure {

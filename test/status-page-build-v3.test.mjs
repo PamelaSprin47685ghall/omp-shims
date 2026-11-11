@@ -152,6 +152,10 @@ describe("SSR bundle", () => {
     expect(html).toContain("专业路由");
     expect(html).toContain("账号健康");
     expect(html).toContain("30 分钟");
+    expect(html).toContain("status-primary-dashboard");
+    expect(html).not.toContain("status-primary-card");
+    expect((html.match(/class="status-dashboard-cell(?: |")/g) ?? []).length).toBe(4);
+    expect(html).toContain("统计纪元与官方价值");
     expect(html).toContain("<noscript");
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/i);
     expect(html).not.toContain("{@html}");

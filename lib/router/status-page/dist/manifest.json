@@ -1,15 +1,16 @@
 {
   "assets": [
+    "status-page.eaAnttYd.js",
+    "status-page.ab34eba7.css"
+  ],
+  "buildId": "sha256-5186f17da354",
+  "css": [
+    "status-page.ab34eba7.css"
+  ],
+  "entry": "status-page.eaAnttYd.js",
+  "retained": [
     "status-page.C71lOCAA.js",
     "status-page.d50ba2e2.css"
-  ],
-  "buildId": "sha256-5b2f608c2fea",
-  "css": [
-    "status-page.d50ba2e2.css"
-  ],
-  "entry": "status-page.C71lOCAA.js",
-  "retained": [
-    "status-page.ff2cc700.css"
   ],
   "schema": 1
 }
