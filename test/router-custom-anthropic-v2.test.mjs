@@ -100,7 +100,7 @@ describe("anthropic models.yml descriptors", () => {
             { type: "tool_use", id: "toolu_1", name: "lookup", input: { q: "x" } },
           ],
           stop_reason: "tool_use",
-          usage: { input_tokens: 7, output_tokens: 3, cache_read_input_tokens: 2 },
+          usage: { input_tokens: 7, output_tokens: 3, cache_read_input_tokens: 2, cache_creation_input_tokens: 1 },
         });
       },
     });
@@ -155,9 +155,9 @@ describe("anthropic models.yml descriptors", () => {
     });
     expect(answer.choices[0].finish_reason).toBe("tool_calls");
     expect(answer.usage).toEqual({
-      prompt_tokens: 7,
+      prompt_tokens: 10,
       completion_tokens: 3,
-      total_tokens: 10,
+      total_tokens: 13,
       prompt_tokens_details: { cached_tokens: 2 },
     });
   });
@@ -245,9 +245,9 @@ describe("anthropic models.yml descriptors", () => {
     expect(frames[4].choices[0].delta.tool_calls[0].function.arguments).toBe('"x"}');
     expect(frames[5].choices[0].finish_reason).toBe("tool_calls");
     expect(frames[6].usage).toEqual({
-      prompt_tokens: 9,
+      prompt_tokens: 13,
       completion_tokens: 5,
-      total_tokens: 14,
+      total_tokens: 18,
       prompt_tokens_details: { cached_tokens: 4 },
     });
     expect(frames[7]).toBe("[DONE]");
