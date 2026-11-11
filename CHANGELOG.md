@@ -64,6 +64,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A `models.yml` provider with `api: anthropic-messages` now serves both the
+  Messages and Chat Completions ingresses. Chat requests convert to Messages,
+  Messages requests pass through with every Anthropic-only field, and the
+  Responses ingress answers `adapter_unsupported` before any provider call.
+  The provider key goes to `x-api-key` by default and never leaves the
+  provider origin.
+- A direct request for a model that exists only in `models.yml` reaches that
+  transport. The gateway serves a provider only from its credential store, so
+  a host-registry entry without a credential row no longer counts as native
+  and no longer returns `Unknown model`.
+- A Messages answer counts `cache_read_input_tokens` and
+  `cache_creation_input_tokens` in Chat `prompt_tokens`. Anthropic reports
+  those counters outside `input_tokens`, so the old mapping under-reported the
+  input of a cached turn.
 - `npm pack` now ships `antigravity-unpause.mjs`. The published v2 tarball
   omitted it while `index.mjs` imported it, so the plugin entry could not load
   from the package.
