@@ -490,6 +490,34 @@ export function lazyRouterHandler({
   const clientOnlyPrefix = config.clientOnlyPrefix ?? "";
   const configuredBasePath = normalizeStatusBasePath(config.statusBasePath);
   const openDirect = directInFlight ?? { open: 0 };
+  // The gateway serves a provider only when its credential store has a row for
+  // it (`credentials.snapshot()`). A models.yml provider is in the host model
+  // registry but has no such row, so the custom-provider transport must own it
+  // even though `nativeRegistered` sees the host entry. Read the provider set
+  // once per minute; while the first read is pending the host catalog decides.
+  const credentialProviders = { names: null, at: 0, pending: null };
+  const credentialProviderNames = () => {
+    if (credentialProviders.names && Date.now() - credentialProviders.at < 60_000) {
+      return Promise.resolve(credentialProviders.names);
+    }
+    if (credentialProviders.pending) return credentialProviders.pending;
+    const read = typeof credentials?.listProviders === "function" ? credentials.listProviders() : Promise.resolve([]);
+    credentialProviders.pending = read
+      .then((names) => {
+        credentialProviders.names = new Set(Array.isArray(names) ? names : []);
+        credentialProviders.at = Date.now();
+        return credentialProviders.names;
+      })
+      .catch(() => {
+        credentialProviders.names ??= new Set();
+        credentialProviders.at = Date.now();
+        return credentialProviders.names;
+      })
+      .finally(() => {
+        credentialProviders.pending = null;
+      });
+    return credentialProviders.pending;
+  };
 
   return async function lazyRouterInbound(request, server, next) {
     let pathname;
@@ -508,7 +536,11 @@ export function lazyRouterHandler({
     if (configuredBasePath !== "" && routePath === pathname && isStatusSurfacePath(routePath, statusPath)) {
       return notFoundResponse(request.method);
     }
-    const nativeRoutable = (model) => router.catalog.host.has(model) || router.catalog.gateway.has(model);
+    const nativeRoutable = (model) => {
+      const { provider } = splitModelRef(model);
+      if (credentialProviders.names && provider && !credentialProviders.names.has(provider)) return false;
+      return router.catalog.host.has(model) || router.catalog.gateway.has(model);
+    };
     const downstream = withExtensionFallback(
       withCustomProviderFallback((rewritten) => next(rewritten), {
         tokenPath,
@@ -568,6 +600,7 @@ export function lazyRouterHandler({
     }
 
     if (inbound.method !== "POST") return next(inbound);
+    await credentialProviderNames();
     const format = formatForPath(routePath);
     if (!format) return downstream(inbound, server);
 
