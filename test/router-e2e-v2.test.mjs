@@ -1009,6 +1009,40 @@ describe("inner gateway 404 failover", () => {
   });
 });
 
+describe("lazy/paid route", () => {
+  const accounts = [{ provider: "kuaipao", id: 71, tier: null }];
+  const rows = [modelRow("kuaipao/claude-sonnet-5-5")];
+
+  test("is advertised under the client-only prefix and serves only the kuaipao Sonnet leaf", async () => {
+    const upstream = createUpstream({
+      accounts,
+      hosts: { ...UPSTREAM_HOSTS, kuaipao: "https://kuaipao.example.test/v1" },
+    });
+    const harness = makeHarness({
+      accounts,
+      rows,
+      upstream,
+      settings: { upstreamHosts: { ...UPSTREAM_HOSTS, kuaipao: "https://kuaipao.example.test/v1" } },
+    });
+    const prefix = loadPlanData().clientOnlyPrefix;
+    const paid = harness.router.advertisedModels().find((row) => row.id === "lazy/paid");
+
+    expect(paid).toMatchObject({
+      object: "model",
+      owned_by: "lazy-router",
+      display_name: "Lazy Paid · Claude Sonnet 5.5",
+    });
+    expect(paid.id.startsWith(prefix)).toBe(true);
+
+    const { response } = await harness.serve({ route: "lazy/paid" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get(SERVED_BY_HEADERS.model)).toBe("lazy/paid");
+    const calls = upstream.regularCallsFor("kuaipao/71");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].model).toBe("kuaipao/claude-sonnet-5-5");
+  });
+});
+
 describe("status snapshot and refresh shape", () => {
   const accounts = [{ provider: "openai-codex", id: 11, tier: "plus" }];
   const rows = [modelRow(CODEX_MODEL)];

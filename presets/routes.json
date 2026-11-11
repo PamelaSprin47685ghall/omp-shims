@@ -3,6 +3,16 @@
   "contextWindow": 500000,
   "maxOutputTokens": 64000,
   "clientOnlyPrefix": "lazy/",
+  "modelTraits": {
+    "$comment": "Minimal capability corrections for channels whose models.yml entry omits them. kuaipao/claude-sonnet-5-5 is the same model id as commandcode/claude-sonnet-5-5, whose live catalog row declares contextWindow 1000000, maxTokens 65536, and text+image input. The route asks for medium reasoning, so the correction declares that level.",
+    "kuaipao/claude-sonnet-5-5": {
+      "contextWindow": 1000000,
+      "maxTokens": 65536,
+      "input": ["text", "image"],
+      "reasoning": true,
+      "efforts": ["medium"]
+    }
+  },
   "providerHeaderTimeouts": {
     "commandcode": 1800000
   },
@@ -130,6 +140,14 @@
             "offPeakOnly": "commandcode"
           }
         ]
+      }
+    },
+    "lazy/paid": {
+      "displayName": "Lazy Paid · Claude Sonnet 5.5",
+      "graph": {
+        "type": "model",
+        "model": "kuaipao/claude-sonnet-5-5",
+        "effort": "medium"
       }
     }
   }

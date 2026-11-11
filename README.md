@@ -43,7 +43,7 @@ The catalog has exactly 13 features. Defaults come from
 | `tool-id-hash` | on | Give every tool-call id a short stable id so upstream accepts long or colliding ids. |
 | `antigravity` | on | Unified Antigravity shim: system instruction, tier routing, continuation recovery, capture, account routing. |
 | `copilot-auto` | on | Negotiate GitHub Copilot Auto model routing and inject the required session token. |
-| `lazy-router` | **off** | Serve `lazy/pro`, `lazy/weak`, `lazy/default`, and `lazy/task` with online ranking and probe-driven failover, plus the `/` operations dashboard. |
+| `lazy-router` | **off** | Serve `lazy/pro`, `lazy/weak`, `lazy/default`, `lazy/task`, and `lazy/paid` with online ranking and probe-driven failover, plus the `/` operations dashboard. |
 | `cline-pin-upstream` | on | Pin ClinePass `chat/completions` to a fixed upstream channel. |
 | `ipv6-first` | on | Resolve IPv6 first for outbound requests, falling back to IPv4 per address. |
 | `plugin-bridge` | on | Expose installed OMP plugins to the auth-gateway model registry and supply credentials. |
@@ -290,11 +290,11 @@ it, and treat the log directory as sensitive.
 
 `lazy-router` is off by default. Its settings:
 
-The bundled preset exposes four routes: `lazy/pro` (rating over the Kiro and
+The bundled preset exposes five routes: `lazy/pro` (rating over the Kiro and
 Antigravity Opus/Gemini 4 units), `lazy/weak` (a 250K-context text route),
-`lazy/default` (Terra, Plus then Pro then API), and `lazy/task` (a DeepSeek
-rating across providers). There is no `rush/*` family and no `lazy/vision` route
-in v2.
+`lazy/default` (Terra, Plus then Pro then API), `lazy/task` (a DeepSeek
+rating across providers), and `lazy/paid` (Kuaipao Claude Sonnet 5.5 at medium
+effort). There is no `rush/*` family and no `lazy/vision` route in v2.
 
 | Setting | Default |
 | --- | --- |

@@ -499,9 +499,15 @@ describe("writeConfig", () => {
 describe("presets", () => {
   const readPreset = (name) => JSON.parse(readFileSync(new URL(`../presets/${name}`, import.meta.url), "utf8"));
 
-  test("routes.json carries the four lazy routes, limits and peak windows", () => {
+  test("routes.json carries the five lazy routes, limits and peak windows", () => {
     const routes = readPreset("routes.json");
-    expect(Object.keys(routes.routes).sort()).toEqual(["lazy/default", "lazy/pro", "lazy/task", "lazy/weak"]);
+    expect(Object.keys(routes.routes).sort()).toEqual([
+      "lazy/default",
+      "lazy/paid",
+      "lazy/pro",
+      "lazy/task",
+      "lazy/weak",
+    ]);
     expect(routes.contextWindow).toBe(500_000);
     expect(routes.maxOutputTokens).toBe(64_000);
     expect(routes.maxInFlight).toMatchObject({ "ollama-cloud": 3, "charm-hyper": 2 });
@@ -511,6 +517,17 @@ describe("presets", () => {
     ]);
     expect(routes.routes["lazy/pro"].graph.type).toBe("rating");
     expect(routes.routes["lazy/task"].graph.children.length).toBeGreaterThan(3);
+    expect(routes.routes["lazy/paid"]).toMatchObject({
+      displayName: "Lazy Paid · Claude Sonnet 5.5",
+      graph: { type: "model", model: "kuaipao/claude-sonnet-5-5", effort: "medium" },
+    });
+    expect(routes.modelTraits["kuaipao/claude-sonnet-5-5"]).toEqual({
+      contextWindow: 1_000_000,
+      maxTokens: 65_536,
+      input: ["text", "image"],
+      reasoning: true,
+      efforts: ["medium"],
+    });
   });
 
   test("holidays-cn.json keeps the documented time zone and year blocks", () => {

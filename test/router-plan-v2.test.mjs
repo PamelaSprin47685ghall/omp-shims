@@ -69,6 +69,20 @@ describe("ComposedPolicy ids and limits", () => {
     expect(policy.displayNameOf("lazy/pro")).toBe("Lazy Pro");
   });
 
+  test("lazy/paid resolves to exactly the kuaipao Sonnet leaf at medium effort", () => {
+    const policy = new ComposedPolicy();
+    expect(policy.routeNames).toContain("lazy/paid");
+    expect(policy.displayNameOf("lazy/paid")).toBe("Lazy Paid · Claude Sonnet 5.5");
+    const candidates = policy.candidatesFor("lazy/paid", { period: "peak", at: PEAK_AT });
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      routeId: "lazy/paid",
+      provider: "kuaipao",
+      model: "kuaipao/claude-sonnet-5-5",
+      effort: "medium",
+    });
+  });
+
   test("maxInFlight reads provider and model keys, and 0 means unlimited", () => {
     const policy = new ComposedPolicy(synthetic);
     expect(policy.maxInFlight("p-a")).toBe(2);
