@@ -1,13 +1,15 @@
 {
   "assets": [
     "status-page.C71lOCAA.js",
-    "status-page.ff2cc700.css"
+    "status-page.d50ba2e2.css"
   ],
-  "buildId": "sha256-fd65c7da76c9",
+  "buildId": "sha256-5b2f608c2fea",
   "css": [
-    "status-page.ff2cc700.css"
+    "status-page.d50ba2e2.css"
   ],
   "entry": "status-page.C71lOCAA.js",
-  "retained": [],
+  "retained": [
+    "status-page.ff2cc700.css"
+  ],
   "schema": 1
 }
